@@ -42,8 +42,19 @@ def load_sources(path: Path = CONFIG_PATH) -> dict[str, list]:
     raw = json.loads(path.read_text(encoding="utf-8"))
     sources: dict[str, list] = {}
     for user_id, entries in raw.items():
+        # "_comment" and the like in the example file are notes, not users.
+        if user_id.startswith("_"):
+            continue
+        if not isinstance(entries, list):
+            log.warning("calendars.json: %r should map to a list of sources, "
+                        "got %s; skipped", user_id, type(entries).__name__)
+            continue
         sources[user_id] = []
         for entry in entries:
+            if not isinstance(entry, dict):
+                log.warning("calendars.json: %s has a non-object entry %r; skipped",
+                            user_id, entry)
+                continue
             kind = entry.get("type")
             name = entry.get("name") or kind
             if kind == "ics":

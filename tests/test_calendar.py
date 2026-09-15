@@ -221,6 +221,9 @@ def test_load_sources_reads_password_from_env():
     os.environ["TEST_ICLOUD_PW"] = "abcd-efgh"
     path = _TMP / "calendars.json"
     path.write_text(json.dumps({
+        # The example file ships with a note at the top level; copying it
+        # verbatim must not crash the loader. It did once.
+        "_comment": "Copy to calendars.json",
         "anton": [{"type": "ics", "name": "google", "url": "https://x/basic.ics"}],
         "masha": [{"type": "caldav", "name": "icloud", "url": "https://caldav.icloud.com/",
                    "username": "m@icloud.com", "password_env": "TEST_ICLOUD_PW",
@@ -232,6 +235,7 @@ def test_load_sources_reads_password_from_env():
     assert isinstance(icloud, CalDavSource)
     assert icloud.password == "abcd-efgh"
     assert icloud.calendars == {"Учёба"}
+    assert set(sources) == {"anton", "masha"}
     assert load_sources(_TMP / "missing.json") == {}
 
 
