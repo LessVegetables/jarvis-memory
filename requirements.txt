@@ -6,8 +6,7 @@
 #   tokenizers            ~3 MB  tokenizer only, the small Rust package
 #   numpy                ~20 MB
 #
-# Step 8 (weather, 2GIS):
-#   requests
+# Step 8 (weather, 2GIS): nothing -- urllib from the standard library.
 #
 # Step 9 (calendar):
 #   icalendar

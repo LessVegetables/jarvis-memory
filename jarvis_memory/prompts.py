@@ -29,6 +29,9 @@ WHO_UNKNOWN = (
     "Ты не узнал говорящего по голосу. Личные данные (расписание, заметки) "
     "раскрывать нельзя — попроси подойти ближе и повторить."
 )
+# Same situation, but the question is not personal -- weather, places,
+# small talk. Refusing would be absurd; answer as you would a guest.
+WHO_GUEST = "Говорящий не опознан. Отвечай как гостю, ничьих личных данных не упоминай."
 
 # Data blocks. Only substituted when there is actually data to show:
 # an empty block never reaches the prompt, so it costs no context.
@@ -47,7 +50,22 @@ REPEAT_EMPTY = "Тебя просят повторить, но ты пока н�
 # "Запомни, что..." -- the fact is already saved by the time the model sees
 # this. Its only job is to confirm out loud.
 REMEMBER_BLOCK = 'Ты только что запомнил: "{fact}". Коротко подтверди это.'
-REMEMBER_DENIED = (
-    "Тебя просят что-то запомнить, но ты не узнал говорящего и не знаешь, "
-    "в чей профиль это записать. Попроси подойти ближе и повторить."
-)
+
+# --- live data: weather (weatherapi.com) and places (2GIS) ------------------
+# Every failure mode has its own sentence, so the model says what actually
+# happened instead of inventing a forecast.
+WEATHER_NO_KEY = ("Погода: сервис не настроен, ключа API нет. "
+                  "Скажи, что пока не можешь узнать погоду.")
+WEATHER_UNAVAILABLE = "Погода: сервис сейчас не отвечает. Скажи об этом честно."
+WEATHER_STALE = "(Сервис не ответил — это последние известные данные, они могли устареть.)"
+WEATHER_PAST = "Погода за прошедшие дни недоступна. Скажи об этом."
+WEATHER_TOO_FAR = "Прогноза на {day} пока нет, есть только на три дня вперёд."
+
+PLACES_NO_KEY = ("Поиск мест: сервис не настроен, ключа 2GIS нет. "
+                 "Скажи, что пока не можешь искать места.")
+PLACES_NO_QUERY = ("Тебя спрашивают о местах поблизости, но непонятно, что "
+                   "именно искать. Переспроси.")
+PLACES_UNAVAILABLE = "Поиск мест по запросу «{query}»: сервис не отвечает. Скажи об этом честно."
+PLACES_NONE = "Поиск мест по запросу «{query}»: поблизости ничего не нашлось."
+PLACES_BLOCK = "Места поблизости по запросу «{query}» (расстояние от дома):\n{lines}"
+PLACES_STALE = "(Данные из кэша, могли устареть.)"

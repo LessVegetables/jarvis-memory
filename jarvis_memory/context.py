@@ -14,12 +14,9 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 
 from . import history, prompts, router, store
+from .providers import places, weather
 
 log = logging.getLogger(__name__)
-
-_WEEKDAYS = ["понедельник", "вторник", "среда", "четверг",
-             "пятница", "суббота", "воскресенье"]
-
 
 @dataclass
 class PromptContext:
@@ -67,15 +64,23 @@ def build_context(user_id: str | None, transcript: str,
 
     # No profile means there is no identified user, whatever the caller
     # passed as user_id. Enforced here rather than trusted from upstream.
+    # Public blocks first: anyone in the kitchen may ask about the weather
+    # or what is nearby, recognised or not.
+    blocks: list[str] = []
+    if intent == router.WEATHER:
+        blocks.append(weather.block(transcript, now))
+    elif intent == router.PLACES:
+        blocks.append(places.block(transcript, now))
+
     if profile is None:
-        who = prompts.WHO_UNKNOWN
-        # An unrecognised speaker cannot write to anyone's profile either.
-        blocks: list[str] = (
-            [prompts.REMEMBER_DENIED] if intent == router.REMEMBER else []
-        )
+        # Personal intents get the refusal. Anything else is answered as to
+        # a guest -- refusing to say what the weather is would be absurd.
+        who = (prompts.WHO_UNKNOWN
+               if intent in (router.SCHEDULE, router.REMEMBER)
+               else prompts.WHO_GUEST)
     else:
         who = prompts.WHO_KNOWN.format(name=profile["name"])
-        blocks = _blocks_for(user_id, transcript, intent, now)
+        blocks += _blocks_for(user_id, transcript, intent, now)
 
     system_prompt = prompts.SYSTEM_TEMPLATE.format(
         who=who,
@@ -148,7 +153,7 @@ def _blocks_for(user_id: str, transcript: str,
     if intent == router.SCHEDULE:
         today = now.date()
         day = router.resolve_day(transcript, today)
-        label = _day_label(day, today)
+        label = router.day_label(day, today)
         events = store.get_schedule(user_id, day)
         if events:
             lines = "\n".join(f"- {time} {title}" for time, title in events)
@@ -192,21 +197,5 @@ def _clip(text: str, limit: int = 160) -> str:
     return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
 
 
-_RELATIVE_LABELS = {-2: "позавчера", -1: "вчера", 0: "сегодня",
-                    1: "завтра", 2: "послезавтра"}
-
-
-def _day_label(day: date, today: date) -> str:
-    """'завтра', or 'в среду, 17.09' for days further out.
-
-    The label matters as much as the rows: the model will repeat whatever
-    day-word it is given, so an unlabelled block invites a confident lie.
-    """
-    offset = (day - today).days
-    if offset in _RELATIVE_LABELS:
-        return _RELATIVE_LABELS[offset]
-    return f"{_WEEKDAYS[day.weekday()]}, {day.day:02d}.{day.month:02d}"
-
-
 def _format_now(now: datetime) -> str:
-    return f"{_WEEKDAYS[now.weekday()]}, {now.day:02d}.{now.month:02d}, {now:%H:%M}"
+    return f"{router.WEEKDAYS[now.weekday()]}, {now.day:02d}.{now.month:02d}, {now:%H:%M}"

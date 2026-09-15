@@ -132,6 +132,25 @@ _DAY_OFFSETS = [
 ]
 
 
+WEEKDAYS = ["понедельник", "вторник", "среда", "четверг",
+            "пятница", "суббота", "воскресенье"]
+_RELATIVE_LABELS = {-2: "позавчера", -1: "вчера", 0: "сегодня",
+                    1: "завтра", 2: "послезавтра"}
+
+
+def day_label(day: date, today: date) -> str:
+    """'завтра', or 'среда, 17.09' for days further out.
+
+    The label matters as much as the data under it: the model repeats
+    whatever day-word it is given, so an unlabelled block invites a
+    confident answer about the wrong day.
+    """
+    offset = (day - today).days
+    if offset in _RELATIVE_LABELS:
+        return _RELATIVE_LABELS[offset]
+    return f"{WEEKDAYS[day.weekday()]}, {day.day:02d}.{day.month:02d}"
+
+
 def resolve_day(transcript: str, today: date) -> date:
     """Which day the question is about. Defaults to today.
 

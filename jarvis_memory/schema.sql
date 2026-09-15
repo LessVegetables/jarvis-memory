@@ -54,3 +54,12 @@ CREATE TABLE IF NOT EXISTS dialogue (
 );
 
 CREATE INDEX IF NOT EXISTS dialogue_by_user_time ON dialogue(user_id, created_at);
+
+-- Responses from live-data APIs (weather, 2GIS), keyed by provider+query.
+-- Served fresh within each provider's TTL, and served stale if the next
+-- fetch fails: old data beats silence, as long as the model is told.
+CREATE TABLE IF NOT EXISTS api_cache (
+    key        TEXT PRIMARY KEY,
+    payload    TEXT NOT NULL,
+    fetched_at TEXT NOT NULL
+);

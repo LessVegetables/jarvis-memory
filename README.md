@@ -53,7 +53,7 @@ there as `.system_prompt` — nothing is lost.
 | "Повтори" and "запомни, что…" | Done |
 | Fact lookup (RAG) | Done — semantic search, falls back to most-recent |
 | Dialogue archive and recall | Done — capped per user, semantic only |
-| Weather, 2GIS | Not started — step 6 |
+| Weather (weatherapi.com), places (2GIS) | Done — cached, degrade to a sentence on failure |
 
 The function signatures in `store.py` do not change — only their bodies do.
 Step 2 swapped hardcoded dicts for SQL queries without touching a single
@@ -133,6 +133,34 @@ Search is scoped per user by a sqlite-vec *partition key*, not by filtering
 afterwards: the nearest k rows globally could easily be someone else's, which
 would leak one housemate's facts into another's answer.
 
+## Live data: weather and places
+
+Keys go in a gitignored `.env` (see `.env.example`), along with the device's
+coordinates — the kitchen does not move, so location is configuration, not
+something the request carries.
+
+```
+WEATHERAPI_KEY=...     # weatherapi.com, free tier
+DGIS_KEY=...           # 2GIS Catalog API
+JARVIS_LAT=55.75  JARVIS_LON=37.62
+```
+
+Anyone may ask, recognised or not — a guest gets the weather and is told
+they are being answered as a guest. Personal data still needs a profile.
+
+Every response is cached in SQLite (`api_cache`): weather for 15 minutes,
+places for a day. If a fetch fails and something is cached, the stale copy
+is served with a note saying so. Old data beats silence in a demo room with
+bad wifi, as long as the model is told it may be old. Every failure mode
+has its own sentence, so the model reports what happened instead of
+inventing a forecast: no key, no network, nothing cached, nothing found.
+
+HTTP timeout is 3 seconds (`JARVIS_HTTP_TIMEOUT`). The person is already
+waiting through STT + LLM + TTS.
+
+One 2GIS quirk: its `point` parameter is `lon,lat`, longitude first. There
+is a test pinning that.
+
 ## Recalling past conversations
 
 Every exchange with a recognised speaker is archived (`record_answer` does
@@ -171,8 +199,8 @@ costs ~200 tokens, of which history is ~50. The knobs are in `history.py`:
 | Intent | Example | What the context gets |
 |---|---|---|
 | `schedule` | «что у меня завтра?» | that day's events, with the day named |
-| `weather` | «зонт нужен?» | step 8 |
-| `places` | «до скольки работает аптека» | step 8 |
+| `weather` | «зонт нужен?» | today's/tomorrow's forecast from weatherapi.com |
+| `places` | «до скольки работает аптека» | nearest matches from 2GIS, with distance and today's hours |
 | `repeat` | «повтори, я не расслышал» | the previous answer, verbatim |
 | `remember` | «запомни, что я не ем острое» | writes a fact, asks for confirmation |
 | `general` | «что приготовить на ужин?» | facts about the user |
@@ -209,6 +237,7 @@ commentary.
 python3 demo.py                # prints real prompts for every intent
 python3 tests/test_router.py   # routing and fact extraction
 python3 tests/test_rag.py      # retrieval plumbing (uses a stand-in embedder)
+python3 tests/test_providers.py   # weather and places, with canned API payloads
 # or, if you have it:  python3 -m pytest tests/ -q
 ```
 
