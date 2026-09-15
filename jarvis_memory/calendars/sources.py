@@ -152,8 +152,28 @@ class CalDavSource:
 
     def _connect(self):
         import caldav
-        return caldav.DAVClient(url=self.url, username=self.username,
-                                password=self.password, timeout=SYNC_TIMEOUT)
+        client = caldav.DAVClient(url=self.url, username=self.username,
+                                  password=self.password, timeout=SYNC_TIMEOUT)
+        _force_http1(client)
+        return client
+
+
+def _force_http1(client) -> None:
+    """Make the CalDAV client speak plain HTTP/1.1.
+
+    caldav 3.x uses niquests when it is installed, which tries HTTP/3 (QUIC
+    over UDP) and HTTP/2 before falling back. On the board that produced
+    "Connection aborted, OSError(5, Input/output error)" on the very first
+    request to iCloud -- a low-level failure from the QUIC attempt, not a
+    credentials problem. CalDAV has never needed anything beyond HTTP/1.1,
+    so disable both. Auth is kept on the client, not the session, so
+    replacing the session loses nothing.
+    """
+    try:
+        import niquests
+    except ImportError:
+        return                      # plain requests: already HTTP/1.1 only
+    client.session = niquests.Session(disable_http2=True, disable_http3=True)
 
 
 def _http_get(url: str) -> bytes:
