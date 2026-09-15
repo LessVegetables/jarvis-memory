@@ -96,7 +96,12 @@ def sync_all(now: datetime | None = None,
                 count = replace_window(user_id, source.id, events, start, end)
                 results[label] = {"ok": True, "events": count}
             except Exception as exc:                           # noqa: BLE001
-                log.exception("calendar sync failed for %s", label)
+                # One line at warning level: an expired password or a dead
+                # URL is routine on a cron log and needs no traceback. The
+                # traceback is still there at DEBUG for the unexpected cases.
+                log.warning("calendar sync failed for %s: %s: %s",
+                            label, type(exc).__name__, exc)
+                log.debug("traceback for %s", label, exc_info=True)
                 results[label] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
     return results
 
