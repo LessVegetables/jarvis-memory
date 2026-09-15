@@ -55,17 +55,24 @@ def build_context(user_id: str | None, transcript: str,
     user_id=None means module B did not recognise the speaker.
     """
     now = now or datetime.now()
-    intent = router.route(transcript)
+    # Route with the previous turn's intent in hand so that a short follow-up
+    # ("а тренировка?") stays on the previous topic instead of falling
+    # through to GENERAL, then record the new intent for the next turn.
+    intent = router.route(transcript, history.get_last_intent(user_id, now=now))
+    history.set_last_intent(user_id, intent, now=now)
     profile = store.get_profile(user_id) if user_id else None
 
     # No profile means there is no identified user, whatever the caller
     # passed as user_id. Enforced here rather than trusted from upstream.
     if profile is None:
         who = prompts.WHO_UNKNOWN
-        blocks: list[str] = []
+        # An unrecognised speaker cannot write to anyone's profile either.
+        blocks: list[str] = (
+            [prompts.REMEMBER_DENIED] if intent == router.REMEMBER else []
+        )
     else:
         who = prompts.WHO_KNOWN.format(name=profile["name"])
-        blocks = _blocks_for(user_id, transcript, intent, now.date())
+        blocks = _blocks_for(user_id, transcript, intent, now)
 
     system_prompt = prompts.SYSTEM_TEMPLATE.format(
         who=who,
@@ -86,7 +93,7 @@ def build_context(user_id: str | None, transcript: str,
 
 
 def _blocks_for(user_id: str, transcript: str,
-                intent: str, today: date) -> list[str]:
+                intent: str, now: datetime) -> list[str]:
     """Which data blocks belong in the prompt for this intent.
 
     Key decision: blocks are selective. A question about the weather should
@@ -96,13 +103,33 @@ def _blocks_for(user_id: str, transcript: str,
     """
     blocks = []
 
+    # "Повтори": hand back what was actually said last time. Recomputing the
+    # answer risks saying something different from what the person half-heard.
+    if intent == router.REPEAT:
+        # `now` must be threaded through rather than letting history fall back
+        # to the wall clock: otherwise a caller passing a fixed time gets its
+        # own recorded answers rejected as stale.
+        last = history.get_last_answer(user_id, now=now)
+        return [prompts.REPEAT_BLOCK.format(answer=last) if last
+                else prompts.REPEAT_EMPTY]
+
+    # "Запомни, что...": the only branch that writes. The fact is stored here
+    # so it is searchable immediately, before the model confirms it out loud.
+    if intent == router.REMEMBER:
+        fact = router.extract_fact(transcript)
+        store.add_fact(user_id, fact)
+        return [prompts.REMEMBER_BLOCK.format(fact=fact)]
+
     if intent == router.SCHEDULE:
-        events = store.get_schedule(user_id, today)
+        today = now.date()
+        day = router.resolve_day(transcript, today)
+        label = _day_label(day, today)
+        events = store.get_schedule(user_id, day)
         if events:
             lines = "\n".join(f"- {time} {title}" for time, title in events)
-            blocks.append(prompts.SCHEDULE_BLOCK.format(lines=lines))
+            blocks.append(prompts.SCHEDULE_BLOCK.format(day=label, lines=lines))
         else:
-            blocks.append(prompts.SCHEDULE_EMPTY)
+            blocks.append(prompts.SCHEDULE_EMPTY.format(day=label))
 
     # Facts help where the answer depends on someone's preferences,
     # and are dead weight in a question about the weather.
@@ -116,6 +143,22 @@ def _blocks_for(user_id: str, transcript: str,
     # requests made at question time, not data read from the database.
 
     return blocks
+
+
+_RELATIVE_LABELS = {-2: "позавчера", -1: "вчера", 0: "сегодня",
+                    1: "завтра", 2: "послезавтра"}
+
+
+def _day_label(day: date, today: date) -> str:
+    """'завтра', or 'в среду, 17.09' for days further out.
+
+    The label matters as much as the rows: the model will repeat whatever
+    day-word it is given, so an unlabelled block invites a confident lie.
+    """
+    offset = (day - today).days
+    if offset in _RELATIVE_LABELS:
+        return _RELATIVE_LABELS[offset]
+    return f"{_WEEKDAYS[day.weekday()]}, {day.day:02d}.{day.month:02d}"
 
 
 def _format_now(now: datetime) -> str:

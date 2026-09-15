@@ -50,19 +50,36 @@ def main():
     for user_id, transcript in CASES:
         show(user_id, transcript)
 
-    # Multi-turn: shows that history really does end up in the messages
-    # of the following request.
+    # Multi-turn: history ends up in the messages of the next request, and
+    # the short follow-up "а завтра?" stays on the schedule topic instead of
+    # falling through to GENERAL.
     print("#" * 70)
-    print("# Multi-turn dialogue")
+    print("# Multi-turn dialogue and sticky follow-up")
     print("#" * 70)
     memory.clear()
+    show("anton", "во сколько у меня лекция?")
     memory.record_answer(
         "anton",
         "во сколько у меня лекция?",
         "В четыре часа дня, аудитория триста пять.",
         now=NOW,
     )
-    show("anton", "а тренировка?")
+    show("anton", "а завтра?")
+
+    # "Повтори": the previous answer is handed back verbatim rather than
+    # recomputed, so the model cannot drift into a different answer.
+    print("#" * 70)
+    print("# Repeat")
+    print("#" * 70)
+    show("anton", "повтори, я не расслышал")
+
+    # "Запомни, что...": the only path that writes. The fact is in the
+    # database by the time the model is asked to confirm it.
+    print("#" * 70)
+    print("# Writing a new fact by voice")
+    print("#" * 70)
+    show("anton", "запомни, что я не ем острое")
+    show(None, "запомни, что я не ем острое")
 
 
 if __name__ == "__main__":

@@ -32,6 +32,20 @@ WHO_UNKNOWN = (
 
 # Data blocks. Only substituted when there is actually data to show:
 # an empty block never reaches the prompt, so it costs no context.
-SCHEDULE_BLOCK = "Расписание на сегодня:\n{lines}"
-SCHEDULE_EMPTY = "Расписание на сегодня: пусто."
+SCHEDULE_BLOCK = "Расписание ({day}):\n{lines}"
+SCHEDULE_EMPTY = "Расписание ({day}): пусто."
 FACTS_BLOCK = "Что важно помнить о собеседнике:\n{lines}"
+
+# "Повтори" -- the previous answer is handed back verbatim and the model is
+# asked to restate it. Cheaper and more reliable than recomputing the answer,
+# and it cannot drift into a different answer than the one already spoken.
+REPEAT_BLOCK = "Повтори этот ответ короче, ничего не добавляя:\n{answer}"
+REPEAT_EMPTY = "Тебя просят повторить, но ты пока ничего не говорил. Скажи об этом."
+
+# "Запомни, что..." -- the fact is already saved by the time the model sees
+# this. Its only job is to confirm out loud.
+REMEMBER_BLOCK = 'Ты только что запомнил: "{fact}". Коротко подтверди это.'
+REMEMBER_DENIED = (
+    "Тебя просят что-то запомнить, но ты не узнал говорящего и не знаешь, "
+    "в чей профиль это записать. Попроси подойти ближе и повторить."
+)

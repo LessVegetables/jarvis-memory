@@ -30,6 +30,12 @@ TTL = timedelta(minutes=5)
 # user_id -> [(timestamp, question, answer), ...]
 _buffers: dict[str, list[tuple[datetime, str, str]]] = {}
 
+# user_id -> (timestamp, intent) of the most recent routed question.
+# Kept separately from _buffers because it is written when the question
+# arrives, while the buffer entry only exists once the answer comes back.
+# The router uses it to resolve short follow-ups like "а тренировка?".
+_last_intent: dict[str, tuple[datetime, str]] = {}
+
 # History for an unrecognised speaker is shared across all of them. Fine for
 # a prototype, but worth remembering: two different guests would see each
 # other's turns.
@@ -82,9 +88,32 @@ def get_last_answer(user_id: str | None,
     return answer if now - ts <= TTL else None
 
 
+def set_last_intent(user_id: str | None, intent: str,
+                    now: datetime | None = None) -> None:
+    """Remember what this question was about, for follow-up resolution."""
+    _last_intent[_key(user_id)] = (now or datetime.now(), intent)
+
+
+def get_last_intent(user_id: str | None,
+                    now: datetime | None = None) -> str | None:
+    """Intent of the previous question, if it is still recent.
+
+    Same TTL as the dialogue buffer: a follow-up to something asked this
+    morning is not a follow-up, it is a new conversation.
+    """
+    now = now or datetime.now()
+    entry = _last_intent.get(_key(user_id))
+    if entry is None:
+        return None
+    timestamp, intent = entry
+    return intent if now - timestamp <= TTL else None
+
+
 def clear(user_id: str | None = None) -> None:
     """Drop history, for one user or all of them. Needed in tests."""
     if user_id is None:
         _buffers.clear()
+        _last_intent.clear()
     else:
         _buffers.pop(_key(user_id), None)
+        _last_intent.pop(_key(user_id), None)

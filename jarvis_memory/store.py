@@ -67,3 +67,33 @@ def get_facts(user_id: str, transcript: str, limit: int = 3) -> list[str]:
 def _describe(row) -> str:
     """'Лекция по матанализу, ауд. 305' -- title plus location when there is one."""
     return f"{row['title']}, {row['location']}" if row["location"] else row["title"]
+
+
+def add_fact(user_id: str, text: str) -> int:
+    """Store a new fact about the user. Returns its row id.
+
+    This is the only write path into long-term memory, and it exists so the
+    assistant's memory can grow by being spoken to rather than by a developer
+    editing seed.py.
+
+    Saying the same thing twice does not store it twice: people repeat
+    themselves, and duplicates would burn the context budget on the same
+    sentence twice over. The comparison is case-insensitive because STT
+    capitalisation is not stable.
+
+    STEP 5: this will also insert the fact's embedding, so a fact said out
+    loud is searchable on the very next question.
+    """
+    conn = db.connect()
+    existing = conn.execute(
+        "SELECT id FROM facts WHERE user_id = ? AND lower(text) = lower(?)",
+        (user_id, text),
+    ).fetchone()
+    if existing:
+        return existing["id"]
+
+    cursor = conn.execute(
+        "INSERT INTO facts (user_id, text) VALUES (?, ?)", (user_id, text)
+    )
+    conn.commit()
+    return cursor.lastrowid

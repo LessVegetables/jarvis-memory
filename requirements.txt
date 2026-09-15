@@ -1,9 +1,18 @@
-# No external dependencies yet: steps 1-4 run on the standard library.
+# Steps 1-4 run on the standard library alone. Nothing to install yet.
 #
-# Arriving at step 5 (RAG):
-#   sqlite-vec          - vector search inside SQLite itself
-#   onnxruntime         - runs the embedding model on the board's CPU
-#   (model: intfloat/multilingual-e5-small, 384 dimensions, exported to ONNX)
+# Step 5 (RAG), on the board:
+#   sqlite-vec          163 KB   vector search inside SQLite (aarch64 wheel exists)
+#   onnxruntime          21 MB   runs the embedding model on the CPU
+#   tokenizers            ~3 MB  tokenizer only, the small Rust package
+#   numpy                ~20 MB
 #
-# At step 6 (weather, 2GIS):
+# Step 8 (weather, 2GIS):
 #   requests
+#
+# Step 9 (calendar):
+#   icalendar
+#
+# NEVER install these on the board: torch, transformers, sentence-transformers.
+# They are multi-gigabyte on ARM64 -- a fifth of the 15 GB disk -- and are only
+# needed to EXPORT the model, which happens on a laptop via
+# tools/export_embedding_model.py. The board loads a .onnx file instead.

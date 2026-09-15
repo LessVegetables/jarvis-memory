@@ -27,7 +27,7 @@ dialogue works: the module never learns what was said back.
 | `.system_prompt` | `str` | System prompt: rules plus this user's data |
 | `.history` | `list[dict]` | Recent turns: `{"role": "user"/"assistant", "content": ...}` |
 | `.transcript` | `str` | The current question |
-| `.intent` | `str` | What the router matched: `schedule` / `weather` / `repeat` / `places` / `general` |
+| `.intent` | `str` | What the router matched: `schedule` / `weather` / `places` / `repeat` / `remember` / `general` |
 | `.to_messages()` | `list[dict]` | **Usually the only thing you need** — system + history + question |
 | `.estimate_tokens()` | `int` | Rough estimate of the context budget used |
 
@@ -49,7 +49,8 @@ there as `.system_prompt` — nothing is lost.
 | Dialogue history, "repeat" | Done |
 | Access control for an unrecognised speaker | Done |
 | User data in SQLite | Done |
-| Intent router | **Stub**, four regexes — step 4 |
+| Intent router, follow-ups, date resolution | Done |
+| "Повтори" and "запомни, что…" | Done |
 | Fact lookup (RAG) | **Stub**: returns 3 most recent facts, ignores the question — step 5 |
 | Weather, 2GIS | Not started — step 6 |
 
@@ -101,13 +102,33 @@ Russian text runs about 2.5 characters per token. A typical request currently
 costs ~200 tokens, of which history is ~50. The knobs are in `history.py`:
 `MAX_TURNS = 3` (exchanges) and `TTL = 5 minutes`.
 
+## Intents
+
+| Intent | Example | What the context gets |
+|---|---|---|
+| `schedule` | «что у меня завтра?» | that day's events, with the day named |
+| `weather` | «зонт нужен?» | step 8 |
+| `places` | «до скольки работает аптека» | step 8 |
+| `repeat` | «повтори, я не расслышал» | the previous answer, verbatim |
+| `remember` | «запомни, что я не ем острое» | writes a fact, asks for confirmation |
+| `general` | «что приготовить на ужин?» | facts about the user |
+
+A short follow-up («а завтра?») keeps the previous turn's intent, so it stays
+on topic instead of falling through to `general`. An explicit match always
+wins over stickiness: «а какая погода?» after a schedule question is a
+weather question.
+
+`tests/test_router.py` is the specification of what the assistant understands.
+When someone reports "it didn't get me", add a row there first, then a
+pattern in `router.py`.
+
 ## Known gaps
 
-- A short follow-up question (`"а тренировка?"`) routes to `general` rather
-  than `schedule`: the keyword router cannot see that the previous turn was
-  about the schedule. Fix belongs in step 4 — carry the previous intent
-  forward when a short phrase matches nothing.
 - History for unrecognised speakers is shared between all of them.
+- Only relative days are understood (сегодня / завтра / послезавтра /
+  вчера). «в пятницу» and «на выходных» are not.
+- Fact extraction is a prefix strip, so «запомни, что мне не нравится X»
+  is stored in first person as said, not normalised to the user's name.
 
 ## Language
 
@@ -118,7 +139,8 @@ commentary.
 ## Running it
 
 ```
-python3 demo.py
+python3 demo.py            # prints real prompts for every intent
+python3 tests/test_router.py   # or: python3 -m pytest tests/ -q
 ```
 
 Prints the prompts for several scenarios, including two different users
