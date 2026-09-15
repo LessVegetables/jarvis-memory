@@ -51,7 +51,7 @@ there as `.system_prompt` — nothing is lost.
 | User data in SQLite | Done |
 | Intent router, follow-ups, date resolution | Done |
 | "Повтори" and "запомни, что…" | Done |
-| Fact lookup (RAG) | **Stub**: returns 3 most recent facts, ignores the question — step 5 |
+| Fact lookup (RAG) | Done — semantic search, falls back to most-recent |
 | Weather, 2GIS | Not started — step 6 |
 
 The function signatures in `store.py` do not change — only their bodies do.
@@ -67,7 +67,8 @@ A single SQLite file, `jarvis.db`, no server process. Schema is in
 |---|---|
 | `users` | `user_id`, name, age |
 | `events` | one row per calendar event: `starts_at` (ISO 8601 text), title, location |
-| `facts` | one short fact per row, for step 5 to retrieve by meaning |
+| `facts` | one short fact per row, retrieved by meaning |
+| `vec_facts` | fact embeddings (virtual table, sqlite-vec) |
 
 Fill it with development data:
 
@@ -85,11 +86,41 @@ Three notes for whoever touches the schema next:
 
 - SQLite has no date type. `starts_at` is ISO 8601 text (`2026-09-21 16:00`),
   which sorts and compares correctly as plain text and works with `date()`.
-- Step 5 does not change these tables. Embeddings go into a separate
-  `sqlite-vec` virtual table keyed by `facts.id`.
+- `vec_facts` is a virtual table, so no foreign key reaches it. Anything
+  that deletes facts must clear it too, or searches join against dead ids.
 - Voice embeddings are not in the schema yet: their dimension depends on
   which extractor task B picks (ECAPA-TDNN is 192, WeSpeaker models vary).
   Ask B before adding that table.
+
+## Semantic search
+
+Fact lookup embeds the question and compares it against stored fact vectors,
+so «можно мне печенье с миндалём?» can retrieve «аллергия на орехи» despite
+sharing no words with it.
+
+Setup is two steps, because the export tooling must not go on the board:
+
+```bash
+# On a LAPTOP (installs torch, ~2-3 GB):
+python3 tools/export_embedding_model.py     # writes models/
+
+# Copy models/ to the board, then there:
+pip install sqlite-vec onnxruntime tokenizers numpy
+python3 -m jarvis_memory.seed               # builds the vectors
+python3 tools/ram_spike.py                  # confirms it fits in RAM
+```
+
+Model: `cointegrated/rubert-tiny2`, 312-dim, ~29M parameters. Chosen over the
+more accurate `multilingual-e5-small` (~470 MB fp32) purely because of the
+4 GB budget shared with a 1.7 GB LLM.
+
+**Without the model everything still runs** — `get_facts` falls back to the
+most recent facts and logs why. `demo.py` prints which path is active. This
+matters so teammates can work without copying a model around.
+
+Search is scoped per user by a sqlite-vec *partition key*, not by filtering
+afterwards: the nearest k rows globally could easily be someone else's, which
+would leak one housemate's facts into another's answer.
 
 ## Context budget
 
@@ -129,6 +160,8 @@ pattern in `router.py`.
   вчера). «в пятницу» and «на выходных» are not.
 - Fact extraction is a prefix strip, so «запомни, что мне не нравится X»
   is stored in first person as said, not normalised to the user's name.
+- Dialogue history is not yet searchable — it lives in RAM and is dropped
+  after 5 minutes (step 7).
 
 ## Language
 
@@ -139,8 +172,10 @@ commentary.
 ## Running it
 
 ```
-python3 demo.py            # prints real prompts for every intent
-python3 tests/test_router.py   # or: python3 -m pytest tests/ -q
+python3 demo.py                # prints real prompts for every intent
+python3 tests/test_router.py   # routing and fact extraction
+python3 tests/test_rag.py      # retrieval plumbing (uses a stand-in embedder)
+# or, if you have it:  python3 -m pytest tests/ -q
 ```
 
 Prints the prompts for several scenarios, including two different users

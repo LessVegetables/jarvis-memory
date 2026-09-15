@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from . import db
+from . import db, embeddings
 
 
 def get_profile(user_id: str) -> dict | None:
@@ -48,18 +48,50 @@ def get_schedule(user_id: str, day: date) -> list[tuple[str, str]]:
 def get_facts(user_id: str, transcript: str, limit: int = 3) -> list[str]:
     """Facts about the user that are relevant to their question.
 
-    FOR NOW: returns the `limit` most recent facts and ignores the question.
-    STEP 5: vector search goes here (sqlite-vec over embeddings of
-    facts.text), and `transcript` finally starts to matter.
+    Searches by meaning: the question is embedded and compared against the
+    stored fact vectors, so "можно мне печенье с миндалём?" retrieves
+    "аллергия на орехи" despite sharing no words with it.
 
-    The default limit is 3 on purpose. There are eight facts per person in
-    the database, and all eight would fit in the context window -- but a
-    1.5B model handles three relevant facts better than eight mostly
-    irrelevant ones. Picking the right three is exactly what step 5 buys.
+    The default limit is 3 on purpose. All eight of a person's facts would
+    fit in the context window -- but a 1.5B model answers better given three
+    relevant facts than eight mostly irrelevant ones. Choosing the right
+    three is the entire value of doing this.
+
+    Falls back to the most recent facts when semantic search is unavailable
+    (no model file, no sqlite-vec). The assistant still answers; it just
+    stops being clever about which facts it mentions.
     """
+    found = _search_facts(user_id, transcript, limit)
+    if found is not None:
+        return found
+
     rows = db.connect().execute(
         "SELECT text FROM facts WHERE user_id = ? ORDER BY id DESC LIMIT ?",
         (user_id, limit),
+    ).fetchall()
+    return [row["text"] for row in rows]
+
+
+def _search_facts(user_id: str, transcript: str, limit: int) -> list[str] | None:
+    """Vector search over this user's facts, or None if unavailable."""
+    if not db.vec_available():
+        return None
+    vectors = embeddings.embed([transcript])
+    if not vectors:
+        return None
+
+    conn = db.connect()
+    # The join is what turns row ids back into text. ORDER BY distance is
+    # applied inside the vec0 table, so `facts` is only read for the winners.
+    rows = conn.execute(
+        """SELECT f.text
+             FROM vec_facts v
+             JOIN facts f ON f.id = v.fact_id
+            WHERE v.user_id = ?
+              AND v.embedding MATCH ?
+              AND k = ?
+         ORDER BY v.distance""",
+        (user_id, embeddings.serialize(vectors[0]), limit),
     ).fetchall()
     return [row["text"] for row in rows]
 
@@ -81,19 +113,60 @@ def add_fact(user_id: str, text: str) -> int:
     sentence twice over. The comparison is case-insensitive because STT
     capitalisation is not stable.
 
-    STEP 5: this will also insert the fact's embedding, so a fact said out
-    loud is searchable on the very next question.
+    The embedding is written in the same call, so a fact said out loud is
+    searchable on the very next question rather than after a rebuild.
     """
     conn = db.connect()
-    existing = conn.execute(
-        "SELECT id FROM facts WHERE user_id = ? AND lower(text) = lower(?)",
-        (user_id, text),
-    ).fetchone()
-    if existing:
-        return existing["id"]
+    # Case folding happens in Python, not in SQL. SQLite's lower() is
+    # ASCII-only: it leaves "Пьёт" untouched, so an SQL comparison would
+    # treat it as different from "пьёт" and store the fact twice.
+    wanted = text.strip().casefold()
+    for row in conn.execute(
+        "SELECT id, text FROM facts WHERE user_id = ?", (user_id,)
+    ):
+        if row["text"].strip().casefold() == wanted:
+            return row["id"]
 
     cursor = conn.execute(
         "INSERT INTO facts (user_id, text) VALUES (?, ?)", (user_id, text)
     )
+    fact_id = cursor.lastrowid
+    _index_facts([(fact_id, user_id, text)])
     conn.commit()
-    return cursor.lastrowid
+    return fact_id
+
+
+def reindex_facts() -> int:
+    """Embed every fact that has no vector yet. Returns how many were done.
+
+    Needed after seeding, and after copying the model onto a machine where
+    facts were written while semantic search was unavailable.
+    """
+    if not db.vec_available():
+        return 0
+    rows = db.connect().execute(
+        """SELECT f.id, f.user_id, f.text
+             FROM facts f
+             LEFT JOIN vec_facts v ON v.fact_id = f.id
+            WHERE v.fact_id IS NULL"""
+    ).fetchall()
+    indexed = _index_facts([(r["id"], r["user_id"], r["text"]) for r in rows])
+    db.connect().commit()
+    return indexed
+
+
+def _index_facts(items: list[tuple[int, str, str]]) -> int:
+    """Embed and store vectors for (fact_id, user_id, text) triples."""
+    if not items or not db.vec_available():
+        return 0
+    vectors = embeddings.embed([text for _, _, text in items])
+    if not vectors:
+        return 0
+
+    conn = db.connect()
+    conn.executemany(
+        "INSERT INTO vec_facts (fact_id, user_id, embedding) VALUES (?, ?, ?)",
+        [(fact_id, user_id, embeddings.serialize(vector))
+         for (fact_id, user_id, _), vector in zip(items, vectors)],
+    )
+    return len(items)

@@ -8,10 +8,15 @@ or supervise.
 
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 import threading
 from pathlib import Path
+
+from .embeddings import DIM
+
+log = logging.getLogger(__name__)
 
 _PACKAGE_DIR = Path(__file__).resolve().parent
 SCHEMA_PATH = _PACKAGE_DIR / "schema.sql"
@@ -41,8 +46,56 @@ def connect() -> sqlite3.Connection:
         # CASCADE silently does nothing.
         conn.execute("PRAGMA foreign_keys = ON")
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        _load_vec(conn)
         _local.conn = conn
     return conn
+
+
+def _load_vec(conn: sqlite3.Connection) -> None:
+    """Load sqlite-vec and create the vector table, if both are possible.
+
+    The vector table cannot live in schema.sql: CREATE VIRTUAL TABLE ... USING
+    vec0 only parses once the extension is loaded, so it is created here.
+
+    Failure is not fatal. Some Python builds ship sqlite3 with extension
+    loading compiled out, and a teammate may simply not have installed the
+    package -- in both cases the module still runs, with fact lookup falling
+    back to a non-semantic query.
+    """
+    # The flag lives on the thread-local, not the connection:
+    # sqlite3.Connection has no __dict__ and rejects new attributes.
+    _local.vec_enabled = False
+    try:
+        import sqlite_vec
+    except ImportError:
+        log.info("sqlite-vec not installed; semantic search disabled")
+        return
+
+    try:
+        conn.enable_load_extension(True)
+        sqlite_vec.load(conn)
+        conn.enable_load_extension(False)
+    except (AttributeError, sqlite3.OperationalError) as exc:
+        log.info("could not load sqlite-vec (%s); semantic search disabled", exc)
+        return
+
+    # user_id as a partition key so a search is scoped to one person inside
+    # the index itself. Filtering after the fact would be wrong: the nearest
+    # k rows overall may contain none of this user's.
+    conn.execute(
+        f"""CREATE VIRTUAL TABLE IF NOT EXISTS vec_facts USING vec0(
+               fact_id INTEGER PRIMARY KEY,
+               user_id TEXT partition key,
+               embedding float[{DIM}]
+           )"""
+    )
+    _local.vec_enabled = True
+
+
+def vec_available() -> bool:
+    """True if vector search is usable on this thread's connection."""
+    connect()
+    return getattr(_local, "vec_enabled", False)
 
 
 def is_seeded() -> bool:
@@ -56,3 +109,4 @@ def close() -> None:
     if conn is not None:
         conn.close()
         _local.conn = None
+        _local.vec_enabled = False

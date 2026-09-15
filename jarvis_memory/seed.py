@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 
-from . import db
+from . import db, store
 
 USERS = [
     ("anton", "Антон", 21),
@@ -73,6 +73,11 @@ def seed(today: date | None = None) -> None:
 
     # ON DELETE CASCADE clears events and facts along with the users.
     conn.execute("DELETE FROM users")
+    # vec_facts is a virtual table, so no foreign key reaches it. Left alone
+    # it would keep vectors pointing at fact ids that no longer exist, and
+    # searches would join against nothing and quietly return fewer results.
+    if db.vec_available():
+        conn.execute("DELETE FROM vec_facts")
 
     conn.executemany("INSERT INTO users (user_id, name, age) VALUES (?, ?, ?)", USERS)
 
@@ -98,6 +103,10 @@ def seed(today: date | None = None) -> None:
 
     conn.commit()
 
+    # Embed the freshly inserted facts, if a model is available. Without this
+    # the facts exist but are invisible to semantic search.
+    store.reindex_facts()
+
 
 def main() -> None:
     seed()
@@ -109,6 +118,20 @@ def main() -> None:
     print(f"Seeded {db.db_path()}")
     for table, count in counts.items():
         print(f"  {table}: {count}")
+
+    if not db.vec_available():
+        print("  vectors: none (sqlite-vec unavailable)")
+    elif not embeddings_available():
+        print("  vectors: none (no embedding model -- fact lookup will fall "
+              "back to most-recent)")
+    else:
+        indexed = conn.execute("SELECT count(*) FROM vec_facts").fetchone()[0]
+        print(f"  vectors: {indexed}")
+
+
+def embeddings_available() -> bool:
+    from . import embeddings
+    return embeddings.is_available()
 
 
 if __name__ == "__main__":

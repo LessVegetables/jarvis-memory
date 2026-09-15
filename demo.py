@@ -15,7 +15,7 @@ The test phrases are Russian because that is what users will say.
 from datetime import date, datetime, time, timedelta
 
 import jarvis_memory as memory
-from jarvis_memory import db, seed
+from jarvis_memory import db, embeddings, seed
 
 # Always a Monday at 14:30, computed from today rather than hardcoded, so it
 # lines up with the events the seed script generates for the current week.
@@ -46,6 +46,15 @@ def main():
     if not db.is_seeded():
         print(f"Empty database, seeding {db.db_path()}\n")
         seed.seed()
+
+    # Say which retrieval path is running. Without this line the fallback is
+    # invisible, and "the facts look wrong" is impossible to diagnose.
+    if db.vec_available() and embeddings.is_available():
+        print("Fact lookup: semantic search (sqlite-vec + embedding model)\n")
+    else:
+        missing = "no embedding model" if db.vec_available() else "no sqlite-vec"
+        print(f"Fact lookup: most-recent fallback ({missing}). "
+              f"See tools/export_embedding_model.py\n")
 
     for user_id, transcript in CASES:
         show(user_id, transcript)
