@@ -1,76 +1,92 @@
-# jarvis-memory — модуль памяти и контекста (задача Ц)
+# jarvis-memory — memory and context module (task C)
 
-По паре **(кто спросил, что спросил)** собирает контекст для LLM: системный
-промпт плюс несколько последних реплик диалога.
+Turns **(who asked, what they asked)** into context for the LLM: a system
+prompt plus the last few turns of dialogue.
 
-Модуль **не** вызывает языковую модель и **не** работает со звуком. Внутри
-только выборки данных и подстановка их в шаблон — обычный код, который можно
-пройти отладчиком построчно.
+This module does **not** call a language model and does **not** touch audio.
+Inside it is only data lookups and string substitution into a template —
+ordinary code you can step through line by line in a debugger.
 
-## Интерфейс для оркестратора (app.py)
+## Interface for the orchestrator (app.py)
 
 ```python
 import jarvis_memory as memory
 
-ctx = memory.build_context(user_id, transcript)   # user_id=None, если голос не опознан
+ctx = memory.build_context(user_id, transcript)   # user_id=None if the voice was not recognised
 answer = llm.generate(ctx.to_messages())
 memory.record_answer(user_id, transcript, answer)
 ```
 
-**Второй вызов обязателен.** Без него не работают ни «повтори», ни диалог из
-нескольких реплик: модуль не узнает, что именно было сказано в ответ.
+**The second call is required.** Without it neither "repeat" nor multi-turn
+dialogue works: the module never learns what was said back.
 
 ### `build_context(user_id, transcript, now=None) -> PromptContext`
 
-| Поле | Тип | Что это |
+| Field | Type | What it is |
 |---|---|---|
-| `.system_prompt` | `str` | Системный промпт: правила + данные пользователя |
-| `.history` | `list[dict]` | Последние реплики: `{"role": "user"/"assistant", "content": ...}` |
-| `.transcript` | `str` | Текущий вопрос |
-| `.intent` | `str` | Что опознал роутер: `schedule` / `weather` / `repeat` / `places` / `general` |
-| `.to_messages()` | `list[dict]` | **Обычно нужно только это** — system + история + вопрос |
-| `.estimate_tokens()` | `int` | Грубая оценка занятого бюджета контекста |
+| `.system_prompt` | `str` | System prompt: rules plus this user's data |
+| `.history` | `list[dict]` | Recent turns: `{"role": "user"/"assistant", "content": ...}` |
+| `.transcript` | `str` | The current question |
+| `.intent` | `str` | What the router matched: `schedule` / `weather` / `repeat` / `places` / `general` |
+| `.to_messages()` | `list[dict]` | **Usually the only thing you need** — system + history + question |
+| `.estimate_tokens()` | `int` | Rough estimate of the context budget used |
 
-### Почему возвращается объект, а не строка
+### Why it returns an object rather than a string
 
-В черновом контракте из ТЗ было `{user_id, transcript} -> system_prompt`.
-История диалога не помещается в это: Qwen2.5-Instruct обучена на диалоговой
-разметке ChatML, и прошлые реплики, переданные отдельными сообщениями
-`user`/`assistant`, она понимает заметно лучше, чем тот же текст, вклеенный
-в системный промпт абзацем. Поэтому модуль отдаёт готовый список сообщений.
-Если оркестратору всё же нужна одна строка — она лежит в `.system_prompt`.
+The draft contract in the spec said `{user_id, transcript} -> system_prompt`.
+Dialogue history does not fit into that. Qwen2.5-Instruct is trained on ChatML
+dialogue markup, and it understands past turns passed as separate `user` /
+`assistant` messages noticeably better than the same text glued into the
+system prompt as a paragraph. So the module returns a ready-made message list
+instead. If the orchestrator really does want a single string, it is still
+there as `.system_prompt` — nothing is lost.
 
-## Что уже работает, а что заглушка
+## What works and what is a stub
 
-| Часть | Статус |
+| Part | Status |
 |---|---|
-| Интерфейс, шаблоны промптов, сборка | Готово |
-| История диалога, «повтори» | Готово |
-| Разграничение доступа для неопознанного | Готово |
-| Данные о пользователях | **Захардкожены** — шаг 2: SQLite |
-| Роутер интентов | **Заглушка** на 4 регулярках — шаг 4 |
-| Поиск фактов (RAG) | **Заглушка**: отдаёт первые 3 факта — шаг 5 |
-| Погода, 2GIS | Не начато — шаг 6 |
+| Interface, prompt templates, assembly | Done |
+| Dialogue history, "repeat" | Done |
+| Access control for an unrecognised speaker | Done |
+| User data | **Hardcoded** — step 2: SQLite |
+| Intent router | **Stub**, four regexes — step 4 |
+| Fact lookup (RAG) | **Stub**: returns the first 3 facts — step 5 |
+| Weather, 2GIS | Not started — step 6 |
 
-Сигнатуры функций в `store.py` меняться не будут — поменяется только их
-содержимое. Код, написанный против них сегодня, продолжит работать после
-перехода на настоящую базу.
+The function signatures in `store.py` will not change — only their bodies
+will. Code written against them today keeps working after the move to a real
+database.
 
-## Бюджет контекста
+## Context budget
 
-Контекст локальной Qwen2.5-1.5B — 2048 или 4096 токенов; число фиксируется
-при конвертации в `.rkllm` и потом не меняется. **Уточнить у задачи Г, какое
-именно** — от этого зависит, сколько реплик истории можно себе позволить.
+A local Qwen2.5-1.5B has a context of 2048 or 4096 tokens. That number is
+fixed when the model is converted to `.rkllm` and cannot be changed
+afterwards. **Ask task G which one it actually is** — how many turns of
+history we can afford depends on it.
 
-Русский текст — примерно 2.5 символа на токен. Сейчас типичный запрос
-занимает ~200 токенов, из них история ~50. Настройки в `history.py`:
-`MAX_TURNS = 3` (пар реплик), `TTL = 5 минут`.
+Russian text runs about 2.5 characters per token. A typical request currently
+costs ~200 tokens, of which history is ~50. The knobs are in `history.py`:
+`MAX_TURNS = 3` (exchanges) and `TTL = 5 minutes`.
 
-## Запуск
+## Known gaps
+
+- A short follow-up question (`"а тренировка?"`) routes to `general` rather
+  than `schedule`: the keyword router cannot see that the previous turn was
+  about the schedule. Fix belongs in step 4 — carry the previous intent
+  forward when a short phrase matches nothing.
+- History for unrecognised speakers is shared between all of them.
+
+## Language
+
+Code, comments and documentation are in English. Prompt templates, seed data
+and router patterns stay in Russian: those are model-facing content, not
+commentary.
+
+## Running it
 
 ```
 python3 demo.py
 ```
 
-Печатает промпты для нескольких сценариев, включая двух разных пользователей
-с одинаковым вопросом и многоходовый диалог. Внешних зависимостей нет.
+Prints the prompts for several scenarios, including two different users
+asking the same question, and a multi-turn dialogue. No external dependencies.

@@ -1,10 +1,10 @@
 """
-Сборка контекста — ядро модуля Ц.
+Context assembly -- the core of module C.
 
-Здесь нет ни одного вызова языковой модели. Всё, что делает build_context, —
-это несколько выборок данных и подстановка их в шаблон строками. Единственный
-инференс LLM во всей цепочке происходит позже и снаружи: оркестратор берёт
-готовые сообщения и отдаёт их Qwen ровно один раз.
+There is not a single language-model call in this file. Everything
+build_context does is a handful of data lookups and some string substitution.
+The one LLM inference in the whole chain happens later and elsewhere: the
+orchestrator takes the finished messages and hands them to Qwen exactly once.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ _WEEKDAYS = ["понедельник", "вторник", "среда", "четв
 
 @dataclass
 class PromptContext:
-    """Готовый контекст для одного запроса к LLM."""
+    """Everything needed for one request to the LLM."""
 
     system_prompt: str
     history: list[dict[str, str]]
@@ -30,7 +30,7 @@ class PromptContext:
     debug: dict = field(default_factory=dict)
 
     def to_messages(self) -> list[dict[str, str]]:
-        """Полный список сообщений — то, что оркестратор передаёт в модель."""
+        """The full message list -- what the orchestrator passes to the model."""
         return [
             {"role": "system", "content": self.system_prompt},
             *self.history,
@@ -38,10 +38,11 @@ class PromptContext:
         ]
 
     def estimate_tokens(self) -> int:
-        """Грубая оценка бюджета: русский текст — примерно 2.5 символа на токен.
+        """Rough budget estimate: Russian text runs about 2.5 chars per token.
 
-        Точность тут не нужна, нужен порядок величины: если оценка ползёт
-        к тысяче, значит история и блоки данных вот-вот вытеснят друг друга.
+        Precision is not the point here, order of magnitude is: if this creeps
+        towards a thousand, history and data blocks are about to start
+        crowding each other out.
         """
         chars = sum(len(m["content"]) for m in self.to_messages())
         return int(chars / 2.5)
@@ -49,16 +50,16 @@ class PromptContext:
 
 def build_context(user_id: str | None, transcript: str,
                   now: datetime | None = None) -> PromptContext:
-    """Собрать контекст по (кто спросил, что спросил).
+    """Assemble context from (who asked, what they asked).
 
-    user_id = None означает, что модуль Б не опознал говорящего.
+    user_id=None means module B did not recognise the speaker.
     """
     now = now or datetime.now()
     intent = router.route(transcript)
     profile = store.get_profile(user_id) if user_id else None
 
-    # Профиль не нашёлся — значит, опознанного пользователя нет,
-    # как бы ни выглядел переданный user_id.
+    # No profile means there is no identified user, whatever the caller
+    # passed as user_id. Enforced here rather than trusted from upstream.
     if profile is None:
         who = prompts.WHO_UNKNOWN
         blocks: list[str] = []
@@ -86,11 +87,12 @@ def build_context(user_id: str | None, transcript: str,
 
 def _blocks_for(user_id: str, transcript: str,
                 intent: str, today: date) -> list[str]:
-    """Какие блоки данных класть в промпт для этого интента.
+    """Which data blocks belong in the prompt for this intent.
 
-    Ключевое решение: блоки подставляются выборочно. Вопрос про погоду не
-    должен тащить в контекст расписание — это не только экономия токенов,
-    маленькая модель ещё и хватается за лишние данные и отвечает не на то.
+    Key decision: blocks are selective. A question about the weather should
+    not drag the schedule into context. That is partly token thrift, but
+    mostly because a small model grabs at whatever is in front of it and
+    answers the wrong question.
     """
     blocks = []
 
@@ -102,16 +104,16 @@ def _blocks_for(user_id: str, transcript: str,
         else:
             blocks.append(prompts.SCHEDULE_EMPTY)
 
-    # Факты полезны там, где ответ зависит от предпочтений человека,
-    # и бесполезны в вопросе про погоду.
+    # Facts help where the answer depends on someone's preferences,
+    # and are dead weight in a question about the weather.
     if intent in (router.PLACES, router.GENERAL):
         facts = store.get_facts(user_id, transcript)
         if facts:
             lines = "\n".join(f"- {fact}" for fact in facts)
             blocks.append(prompts.FACTS_BLOCK.format(lines=lines))
 
-    # ШАГ 6: сюда добавится блок погоды и блок 2GIS — это будут HTTP-запросы
-    # в момент вопроса, а не данные из базы.
+    # STEP 6: a weather block and a 2GIS block go here -- those will be HTTP
+    # requests made at question time, not data read from the database.
 
     return blocks
 

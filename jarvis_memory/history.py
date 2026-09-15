@@ -1,35 +1,38 @@
 """
-Короткая память диалога: последние реплики + последний ответ ("повтори").
+Short-term dialogue memory: the last few exchanges, plus the last answer
+(which is what makes "repeat" possible).
 
-Живёт в оперативной памяти, а не в базе: это состояние текущего разговора,
-а не факт о пользователе. После перезапуска устройства его не жалко потерять.
+Kept in RAM rather than in the database: this is the state of the current
+conversation, not a fact about a person. Losing it on reboot is fine.
 
-Два ограничения, которых не было в телеграм-ботах на облачных моделях:
+Two constraints that did not exist in a Telegram bot backed by a cloud model:
 
-1. MAX_TURNS мал. Контекст локальной Qwen2.5-1.5B — это 2048 или 4096 токенов
-   (число фиксируется при конвертации в .rkllm и потом не меняется). История
-   конкурирует за этот бюджет с расписанием и фактами, то есть ровно с тем,
-   ради чего проект и делается. Плюс маленькая модель тем хуже держит нить,
-   чем длиннее контекст: на десятой реплике она начнёт отвечать на шестую.
+1. MAX_TURNS is small. A local Qwen2.5-1.5B has a context of 2048 or 4096
+   tokens -- the number is fixed when the model is converted to .rkllm and
+   cannot be changed afterwards. History competes for that budget with the
+   schedule and the facts, i.e. with the exact thing this project exists to
+   show. On top of that, a small model holds the thread worse the longer the
+   context gets: by the tenth turn it starts answering the sixth question.
 
-2. TTL. Телеграм-чат — это непрерывный приватный тред: вернулся через неделю,
-   и история всё ещё твоя и всё ещё уместна. Кухонная колонка — не тред.
-   Если Антон спросил что-то в девять утра, а подошёл снова в семь вечера,
-   подставлять утренние реплики нельзя: это уже другой разговор.
+2. TTL. A Telegram chat is a continuous private thread: come back a week
+   later and the history is still yours and still relevant. A kitchen speaker
+   is not a thread. If Anton asked something at 9am and walks up again at 7pm,
+   replaying the morning is wrong -- that is a different conversation.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-MAX_TURNS = 3          # пар "вопрос-ответ", не сообщений
+MAX_TURNS = 3          # exchanges (question + answer), not messages
 TTL = timedelta(minutes=5)
 
-# user_id -> [(timestamp, вопрос, ответ), ...]
+# user_id -> [(timestamp, question, answer), ...]
 _buffers: dict[str, list[tuple[datetime, str, str]]] = {}
 
-# История для неопознанного говорящего общая на всех — для прототипа сойдёт,
-# но помнить об этом стоит: два разных гостя увидят реплики друг друга.
+# History for an unrecognised speaker is shared across all of them. Fine for
+# a prototype, but worth remembering: two different guests would see each
+# other's turns.
 _UNKNOWN_KEY = "_unknown"
 
 
@@ -39,7 +42,7 @@ def _key(user_id: str | None) -> str:
 
 def record_answer(user_id: str | None, question: str, answer: str,
                   now: datetime | None = None) -> None:
-    """Запомнить обмен репликами. Оркестратор вызывает это после ответа LLM."""
+    """Store one exchange. The orchestrator calls this after the LLM replies."""
     now = now or datetime.now()
     buf = _buffers.setdefault(_key(user_id), [])
     buf.append((now, question, answer))
@@ -48,12 +51,13 @@ def record_answer(user_id: str | None, question: str, answer: str,
 
 def get_history(user_id: str | None,
                 now: datetime | None = None) -> list[dict[str, str]]:
-    """Последние реплики в формате сообщений чата, свежее TTL.
+    """Recent turns, fresher than TTL, in chat-message form.
 
-    Формат [{"role": ..., "content": ...}] выбран не случайно: Qwen2.5-Instruct
-    обучена на диалоговой разметке ChatML, и реплики, переданные как отдельные
-    сообщения user/assistant, она понимает заметно лучше, чем тот же текст,
-    вклеенный в системный промпт абзацем "Ранее в диалоге: ...".
+    The [{"role": ..., "content": ...}] shape is not arbitrary: Qwen2.5-Instruct
+    is trained on ChatML dialogue markup, and it understands past turns passed
+    as separate user/assistant messages noticeably better than the same text
+    glued into the system prompt as a "previously in this conversation"
+    paragraph.
     """
     now = now or datetime.now()
     fresh = [(ts, q, a) for ts, q, a in _buffers.get(_key(user_id), [])
@@ -69,7 +73,7 @@ def get_history(user_id: str | None,
 
 def get_last_answer(user_id: str | None,
                     now: datetime | None = None) -> str | None:
-    """Текст последнего ответа — основа для интента "повтори"."""
+    """Text of the most recent answer -- the basis for the "repeat" intent."""
     now = now or datetime.now()
     buf = _buffers.get(_key(user_id), [])
     if not buf:
@@ -79,7 +83,7 @@ def get_last_answer(user_id: str | None,
 
 
 def clear(user_id: str | None = None) -> None:
-    """Сбросить историю (одного пользователя или всю). Нужно в тестах."""
+    """Drop history, for one user or all of them. Needed in tests."""
     if user_id is None:
         _buffers.clear()
     else:

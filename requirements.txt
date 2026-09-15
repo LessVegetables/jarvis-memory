@@ -1,9 +1,9 @@
-# Внешних зависимостей пока нет: шаги 1-4 работают на стандартной библиотеке.
+# No external dependencies yet: steps 1-4 run on the standard library.
 #
-# Появятся на шаге 5 (RAG):
-#   sqlite-vec          — векторный поиск прямо в SQLite
-#   onnxruntime         — запуск модели эмбеддингов на CPU платы
-#   (модель: intfloat/multilingual-e5-small, 384 измерения, экспорт в ONNX)
+# Arriving at step 5 (RAG):
+#   sqlite-vec          - vector search inside SQLite itself
+#   onnxruntime         - runs the embedding model on the board's CPU
+#   (model: intfloat/multilingual-e5-small, 384 dimensions, exported to ONNX)
 #
-# На шаге 6 (погода, 2GIS):
+# At step 6 (weather, 2GIS):
 #   requests

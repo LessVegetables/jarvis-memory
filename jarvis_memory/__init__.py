@@ -1,19 +1,19 @@
 """
-jarvis_memory — модуль памяти и контекста Джарвиса (задача Ц).
+jarvis_memory -- Jarvis's memory and context module (task C).
 
-Что делает: по паре (кто спросил, что спросил) собирает контекст для LLM.
-Чего не делает: не обращается к языковой модели, не работает со звуком.
+What it does: turns (who asked, what they asked) into context for the LLM.
+What it does not do: call a language model, or touch audio.
 
-Использование из оркестратора (app.py):
+Use from the orchestrator (app.py):
 
     import jarvis_memory as memory
 
-    ctx = memory.build_context(user_id, transcript)   # user_id=None, если голос не опознан
+    ctx = memory.build_context(user_id, transcript)   # user_id=None if voice unrecognised
     answer = llm.generate(ctx.to_messages())
     memory.record_answer(user_id, transcript, answer)
 
-Второй вызов обязателен: без него не работают ни "повтори", ни диалог
-из нескольких реплик — модуль просто не узнает, что именно было сказано.
+The second call is required. Without it neither "repeat" nor multi-turn
+dialogue works -- the module simply never learns what was said back.
 """
 
 from .context import PromptContext, build_context

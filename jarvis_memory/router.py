@@ -1,15 +1,17 @@
 """
-Определение намерения (интента) по тексту вопроса.
+Intent detection from the text of the question.
 
-ЭТО ЗАГЛУШКА. По плану полноценный роутер — шаг 4; сейчас здесь ровно
-столько, чтобы demo.py показывал разные ветки. Не развивать этот файл,
-пока не готовы шаги 2-3 (база и SQL-путь).
+THIS IS A STUB. The real router is step 4 of the plan; what is here is just
+enough for demo.py to show different branches. Do not grow this file until
+steps 2-3 (database and the SQL path) are done.
 
-Почему не function calling силами самой LLM: Qwen2.5-1.5B в квантизации
-w8a8, на русском языке, выбирает инструмент ненадёжно, и это стоит целого
-лишнего прохода инференса. В цепочке wake word -> STT -> LLM -> TTS каждый
-лишний проход — это секунды задержки на плате. Тридцать регулярок работают
-за микросекунды, отлаживаются глазами и ошибаются предсказуемо.
+Why not let the LLM do function calling instead: Qwen2.5-1.5B, quantised to
+w8a8, prompted in Russian, picks tools unreliably -- and it costs a whole
+extra inference pass to do it. In a wake word -> STT -> LLM -> TTS chain,
+every extra pass is real seconds of latency on the board. Thirty regexes run
+in microseconds, can be debugged by reading them, and fail predictably.
+
+The patterns are Russian because the user speaks Russian.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ SCHEDULE = "schedule"
 WEATHER = "weather"
 REPEAT = "repeat"
 PLACES = "places"
-GENERAL = "general"     # ничего не опознали — общий разговор
+GENERAL = "general"     # nothing matched -- ordinary conversation
 
 _PATTERNS = [
     (REPEAT, r"\bповтор|\bчто ты сказал|\bещё раз\b"),
@@ -31,7 +33,7 @@ _PATTERNS = [
 
 
 def route(transcript: str) -> str:
-    """Вернуть интент. Первое совпадение выигрывает — порядок важен."""
+    """Return the intent. First match wins, so the order above matters."""
     text = transcript.lower()
     for intent, pattern in _PATTERNS:
         if re.search(pattern, text):
