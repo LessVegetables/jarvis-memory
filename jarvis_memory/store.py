@@ -30,6 +30,23 @@ def get_profile(user_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+def add_user(user_id: str, name: str, age: int | None = None) -> None:
+    """Create or update a user.
+
+    user_id must be exactly what module B (speaker identification) emits
+    for this person -- it is the key everything else hangs off. Nothing
+    creates users implicitly: a calendar or a fact for an id that does not
+    exist is a misconfiguration worth noticing, not something to paper over.
+    """
+    conn = db.connect()
+    conn.execute(
+        "INSERT INTO users (user_id, name, age) VALUES (?, ?, ?) "
+        "ON CONFLICT(user_id) DO UPDATE SET name = excluded.name, age = excluded.age",
+        (user_id, name, age),
+    )
+    conn.commit()
+
+
 def get_schedule(user_id: str, day: date) -> list[tuple[str, str]]:
     """Events for the given day: [(time, title), ...], earliest first.
 

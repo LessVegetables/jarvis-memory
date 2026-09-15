@@ -36,6 +36,8 @@ def load_dotenv(path: Path = ENV_PATH) -> int:
             continue
         key, _, value = line.partition("=")
         key = key.strip()
+        if key.startswith("export "):        # shell habit; harmless here
+            key = key[len("export "):].strip()
         value = value.strip().strip('"').strip("'")
         if key and key not in os.environ:
             os.environ[key] = value

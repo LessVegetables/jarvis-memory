@@ -87,7 +87,8 @@ def sync_all(now: datetime | None = None,
     results: dict[str, dict] = {}
     for user_id, user_sources in sources.items():
         if store.get_profile(user_id) is None:
-            log.warning("calendars.json names unknown user %r; skipped", user_id)
+            log.warning("calendars.json names unknown user %r; skipped "
+                        "(add them: python3 tools/add_user.py %s \"Имя\")", user_id, user_id)
             continue
         for source in user_sources:
             label = f"{user_id}/{source.id}"

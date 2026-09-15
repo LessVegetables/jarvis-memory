@@ -134,6 +134,20 @@ Search is scoped per user by a sqlite-vec *partition key*, not by filtering
 afterwards: the nearest k rows globally could easily be someone else's, which
 would leak one housemate's facts into another's answer.
 
+## Users
+
+`seed.py` creates two fake demo users, `anton` and `masha`. Real people are
+added with:
+
+```bash
+python3 tools/add_user.py daniel "Даниил" 21
+```
+
+The `user_id` must be **exactly the id module B emits** for that voice —
+it is the key everything else hangs off. Nothing creates users implicitly:
+a calendar or a fact for an unknown id is logged and skipped, because a
+mismatch with speaker identification is worth noticing, not hiding.
+
 ## Calendar sync
 
 Google and iCloud calendars are pulled into the `events` table on a timer.
