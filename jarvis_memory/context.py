@@ -9,10 +9,13 @@ orchestrator takes the finished messages and hands them to Qwen exactly once.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
 from . import history, prompts, router, store
+
+log = logging.getLogger(__name__)
 
 _WEEKDAYS = ["понедельник", "вторник", "среда", "четверг",
              "пятница", "суббота", "воскресенье"]
@@ -92,6 +95,28 @@ def build_context(user_id: str | None, transcript: str,
     return ctx
 
 
+def record_answer(user_id: str | None, question: str, answer: str,
+                  now: datetime | None = None) -> None:
+    """Feed the model's answer back into memory. The orchestrator calls this
+    after every reply.
+
+    Two destinations: the live buffer in RAM (what the next few turns see)
+    and the permanent archive in SQLite (what can be recalled weeks later).
+    Unrecognised speakers get the first and not the second -- a guest's
+    conversation is nobody's memory.
+    """
+    now = now or datetime.now()
+    history.record_answer(user_id, question, answer, now=now)
+    if user_id is None:
+        return
+    try:
+        store.archive_exchange(user_id, question, answer, now=now)
+    except Exception:                                          # noqa: BLE001
+        # The archive is a nice-to-have. A failure here must not surface to
+        # the orchestrator and take the assistant's voice away mid-sentence.
+        log.exception("could not archive exchange")
+
+
 def _blocks_for(user_id: str, transcript: str,
                 intent: str, now: datetime) -> list[str]:
     """Which data blocks belong in the prompt for this intent.
@@ -139,10 +164,32 @@ def _blocks_for(user_id: str, transcript: str,
             lines = "\n".join(f"- {fact}" for fact in facts)
             blocks.append(prompts.FACTS_BLOCK.format(lines=lines))
 
+    # Past conversations only for open-ended questions. A schedule or weather
+    # question gains nothing from old chatter, and a small model will happily
+    # answer the old question instead of the new one if both are in view.
+    # Turns still inside the live buffer are excluded: they are already in
+    # the messages and would otherwise appear twice.
+    if intent == router.GENERAL:
+        past = store.get_dialogue(user_id, transcript, limit=2,
+                                  before=now - history.TTL)
+        if past:
+            lines = "\n".join(
+                prompts.DIALOGUE_LINE.format(question=_clip(q), answer=_clip(a))
+                for q, a in past
+            )
+            blocks.append(prompts.DIALOGUE_BLOCK.format(lines=lines))
+
     # STEP 6: a weather block and a 2GIS block go here -- those will be HTTP
     # requests made at question time, not data read from the database.
 
     return blocks
+
+
+def _clip(text: str, limit: int = 160) -> str:
+    """Keep recalled turns short. Answers are meant to be one or two
+    sentences, but a runaway one should not eat the context budget."""
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
 
 
 _RELATIVE_LABELS = {-2: "позавчера", -1: "вчера", 0: "сегодня",

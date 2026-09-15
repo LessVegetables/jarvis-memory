@@ -12,12 +12,13 @@ Use from the orchestrator (app.py):
     answer = llm.generate(ctx.to_messages())
     memory.record_answer(user_id, transcript, answer)
 
-The second call is required. Without it neither "repeat" nor multi-turn
-dialogue works -- the module simply never learns what was said back.
+The second call is required. Without it neither "repeat", multi-turn
+dialogue, nor recall of past conversations works -- the module simply never
+learns what was said back.
 """
 
-from .context import PromptContext, build_context
-from .history import clear, get_last_answer, record_answer
+from .context import PromptContext, build_context, record_answer
+from .history import clear, get_last_answer
 
 __all__ = [
     "build_context",

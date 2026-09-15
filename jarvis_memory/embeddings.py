@@ -32,8 +32,10 @@ from typing import Callable, Sequence
 log = logging.getLogger(__name__)
 
 # rubert-tiny2 produces 312-dimensional vectors. If the model is swapped,
-# this must change with it -- and the vec0 table has to be rebuilt, since
-# its column width is fixed at creation.
+# this must change with it, the pooling in _load_onnx_backend must be
+# checked against the new model's config, and every vector must be rebuilt
+# (tools/rebuild_vectors.py) -- vectors from two different models or two
+# different poolings are not comparable.
 DIM = 312
 
 _MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
@@ -115,6 +117,10 @@ def _load_onnx_backend():
         log.info("embedding dependencies missing (%s); semantic search disabled", exc)
         return None
 
+    # Errors only. Otherwise onnxruntime prints a warning on every start
+    # about failing to discover a GPU the board does not have.
+    ort.set_default_logger_severity(3)
+
     tokenizer_path = _MODELS_DIR / "tokenizer.json"
     if not tokenizer_path.exists():
         log.warning("model present but %s is missing", tokenizer_path)
@@ -142,11 +148,13 @@ def _load_onnx_backend():
 
         hidden = session.run(None, feed)[0]
 
-        # Mean pooling over real tokens only. Including padding would drag
-        # every vector towards zero by an amount that depends on how much
-        # padding there happened to be -- i.e. on batch composition.
-        expanded = mask[..., None].astype(hidden.dtype)
-        pooled = (hidden * expanded).sum(axis=1) / np.maximum(expanded.sum(axis=1), 1e-9)
+        # CLS pooling: the vector for the whole sentence is the first token's
+        # output. This is how rubert-tiny2 was trained to be read -- its
+        # 1_Pooling/config.json on HuggingFace says pooling_mode_cls_token.
+        # Mean pooling would also produce a self-consistent space, but not
+        # the one the model was optimised for, and retrieval quality drops.
+        # If the model is ever swapped, check that file again.
+        pooled = hidden[:, 0, :]
 
         # L2-normalise so that Euclidean distance ranks identically to cosine
         # similarity. sqlite-vec's default metric is L2, and on unit vectors

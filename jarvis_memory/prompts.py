@@ -35,6 +35,8 @@ WHO_UNKNOWN = (
 SCHEDULE_BLOCK = "Расписание ({day}):\n{lines}"
 SCHEDULE_EMPTY = "Расписание ({day}): пусто."
 FACTS_BLOCK = "Что важно помнить о собеседнике:\n{lines}"
+DIALOGUE_BLOCK = "Из прошлых разговоров с ним:\n{lines}"
+DIALOGUE_LINE = "- Спрашивал: «{question}» — ты ответил: «{answer}»"
 
 # "Повтори" -- the previous answer is handed back verbatim and the model is
 # asked to restate it. Cheaper and more reliable than recomputing the answer,

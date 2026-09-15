@@ -39,3 +39,18 @@ CREATE INDEX IF NOT EXISTS facts_by_user ON facts(user_id);
 -- Voice embeddings (task C also owns these, per the spec) are NOT here yet:
 -- their dimension depends on which extractor module B settles on
 -- (ECAPA-TDNN is 192, WeSpeaker models vary). Ask B before adding a table.
+
+-- Every exchange, kept so the assistant can recall things said weeks ago.
+-- Capped per user (see store.MAX_DIALOGUE_ROWS): on a 4 GB / 15 GB device an
+-- unbounded table is a slow-motion outage. Vectors live in vec_dialogue,
+-- created in db.py, with created_at duplicated there as an integer so the
+-- vector search itself can exclude turns that are still in the live buffer.
+CREATE TABLE IF NOT EXISTS dialogue (
+    id         INTEGER PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    question   TEXT NOT NULL,
+    answer     TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS dialogue_by_user_time ON dialogue(user_id, created_at);

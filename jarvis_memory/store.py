@@ -11,9 +11,14 @@ Run `python3 -m jarvis_memory.seed` to fill the database with dev data.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 from . import db, embeddings
+
+# Per user. 500 exchanges is weeks of kitchen conversation, and at 312
+# float32s each the vectors for it are ~600 KB. The cap is what keeps the
+# archive from growing until the disk fills.
+MAX_DIALOGUE_ROWS = 500
 
 
 def get_profile(user_id: str) -> dict | None:
@@ -170,3 +175,141 @@ def _index_facts(items: list[tuple[int, str, str]]) -> int:
          for (fact_id, user_id, _), vector in zip(items, vectors)],
     )
     return len(items)
+
+
+# --- dialogue archive --------------------------------------------------------
+
+def archive_exchange(user_id: str, question: str, answer: str,
+                     now: datetime | None = None) -> int:
+    """Keep one exchange permanently, embedded so it can be recalled by meaning.
+
+    Written immediately rather than when the turn ages out of the live
+    buffer: simpler, and nothing is lost if the process dies in between.
+    The overlap with the live buffer is handled on the read side, which
+    excludes anything newer than the buffer's TTL.
+    """
+    now = now or datetime.now()
+    conn = db.connect()
+    cursor = conn.execute(
+        "INSERT INTO dialogue (user_id, question, answer, created_at) "
+        "VALUES (?, ?, ?, ?)",
+        (user_id, question, answer, now.strftime("%Y-%m-%d %H:%M:%S")),
+    )
+    dialogue_id = cursor.lastrowid
+    _index_dialogue([(dialogue_id, user_id, int(now.timestamp()),
+                      _dialogue_document(question, answer))])
+    _prune_dialogue(user_id)
+    conn.commit()
+    return dialogue_id
+
+
+def get_dialogue(user_id: str, transcript: str, limit: int = 2,
+                 before: datetime | None = None) -> list[tuple[str, str]]:
+    """Past exchanges relevant to the question: [(question, answer), ...].
+
+    `before` excludes turns newer than that moment -- the caller passes the
+    live buffer's cutoff, since those turns are already in the messages and
+    would otherwise appear twice.
+
+    No non-semantic fallback here, unlike get_facts. Random old chatter is
+    worse than nothing: the model will latch onto it. Without a model, the
+    assistant simply does not recall past conversations.
+    """
+    if not db.vec_available():
+        return []
+    vectors = embeddings.embed([transcript])
+    if not vectors:
+        return []
+
+    cutoff = int((before or datetime.now()).timestamp())
+    rows = db.connect().execute(
+        """SELECT d.question, d.answer
+             FROM vec_dialogue v
+             JOIN dialogue d ON d.id = v.dialogue_id
+            WHERE v.user_id = ?
+              AND v.created_at < ?
+              AND v.embedding MATCH ?
+              AND k = ?
+         ORDER BY v.distance""",
+        (user_id, cutoff, embeddings.serialize(vectors[0]), limit),
+    ).fetchall()
+    return [(row["question"], row["answer"]) for row in rows]
+
+
+def reindex_dialogue() -> int:
+    """Embed every archived exchange that has no vector yet."""
+    if not db.vec_available():
+        return 0
+    rows = db.connect().execute(
+        """SELECT d.id, d.user_id, d.question, d.answer, d.created_at
+             FROM dialogue d
+             LEFT JOIN vec_dialogue v ON v.dialogue_id = d.id
+            WHERE v.dialogue_id IS NULL"""
+    ).fetchall()
+    items = [
+        (r["id"], r["user_id"],
+         int(datetime.strptime(r["created_at"], "%Y-%m-%d %H:%M:%S").timestamp()),
+         _dialogue_document(r["question"], r["answer"]))
+        for r in rows
+    ]
+    indexed = _index_dialogue(items)
+    db.connect().commit()
+    return indexed
+
+
+def rebuild_vectors() -> dict[str, int]:
+    """Drop every vector and embed everything again.
+
+    Required whenever the embedding changes -- a different model, or a
+    different pooling -- because vectors from two different embeddings are
+    not comparable and mixing them makes search return nonsense.
+    """
+    if not db.vec_available():
+        return {"facts": 0, "dialogue": 0}
+    conn = db.connect()
+    conn.execute("DELETE FROM vec_facts")
+    conn.execute("DELETE FROM vec_dialogue")
+    conn.commit()
+    return {"facts": reindex_facts(), "dialogue": reindex_dialogue()}
+
+
+def _dialogue_document(question: str, answer: str) -> str:
+    """The text that gets embedded for one exchange -- both halves, so a
+    later question can match either what was asked or what was answered."""
+    return f"Вопрос: {question}\nОтвет: {answer}"
+
+
+def _index_dialogue(items: list[tuple[int, str, int, str]]) -> int:
+    """Embed and store (dialogue_id, user_id, created_at, document) rows."""
+    if not items or not db.vec_available():
+        return 0
+    vectors = embeddings.embed([doc for _, _, _, doc in items])
+    if not vectors:
+        return 0
+    db.connect().executemany(
+        "INSERT INTO vec_dialogue (dialogue_id, user_id, created_at, embedding) "
+        "VALUES (?, ?, ?, ?)",
+        [(dialogue_id, user_id, created_at, embeddings.serialize(vector))
+         for (dialogue_id, user_id, created_at, _), vector in zip(items, vectors)],
+    )
+    return len(items)
+
+
+def _prune_dialogue(user_id: str) -> int:
+    """Delete the oldest exchanges beyond MAX_DIALOGUE_ROWS. Returns how many."""
+    conn = db.connect()
+    total = conn.execute(
+        "SELECT count(*) FROM dialogue WHERE user_id = ?", (user_id,)
+    ).fetchone()[0]
+    excess = total - MAX_DIALOGUE_ROWS
+    if excess <= 0:
+        return 0
+    ids = [row["id"] for row in conn.execute(
+        "SELECT id FROM dialogue WHERE user_id = ? ORDER BY created_at, id LIMIT ?",
+        (user_id, excess),
+    )]
+    placeholders = ",".join("?" * len(ids))
+    if db.vec_available():
+        conn.execute(f"DELETE FROM vec_dialogue WHERE dialogue_id IN ({placeholders})", ids)
+    conn.execute(f"DELETE FROM dialogue WHERE id IN ({placeholders})", ids)
+    return len(ids)

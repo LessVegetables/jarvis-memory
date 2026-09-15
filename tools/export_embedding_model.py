@@ -2,7 +2,7 @@
 """
 Export the Russian embedding model to ONNX. RUN THIS ON A LAPTOP, NOT THE BOARD.
 
-    pip install torch transformers onnx onnxruntime    # laptop only!
+    pip install torch transformers onnx onnxscript onnxruntime    # laptop only!
     python3 tools/export_embedding_model.py
 
 Writes models/ru_embed.onnx (+ tokenizer.json) and prints the file sizes.
@@ -31,6 +31,7 @@ def main() -> int:
     except ImportError:
         print(__doc__)
         print("ERROR: torch/transformers missing. Install them on your LAPTOP.")
+        print("       (torch >= 2.5 also needs onnxscript, even for the classic exporter)")
         return 1
 
     OUT_DIR.mkdir(exist_ok=True)
@@ -44,10 +45,7 @@ def main() -> int:
 
     onnx_path = OUT_DIR / "ru_embed.onnx"
     sample = tokenizer("пример текста", return_tensors="pt")
-    torch.onnx.export(
-        model,
-        (sample["input_ids"], sample["attention_mask"], sample["token_type_ids"]),
-        onnx_path,
+    export_kwargs = dict(
         input_names=["input_ids", "attention_mask", "token_type_ids"],
         output_names=["last_hidden_state"],
         # Both axes dynamic: sentences vary in length and we embed in batches
@@ -60,6 +58,15 @@ def main() -> int:
         },
         opset_version=14,
     )
+    inputs = (sample["input_ids"], sample["attention_mask"], sample["token_type_ids"])
+    try:
+        # torch >= 2.5 defaults to a new exporter that needs the onnxscript
+        # package; dynamo=False selects the classic one, which does not.
+        torch.onnx.export(model, inputs, onnx_path, dynamo=False, **export_kwargs)
+    except TypeError:
+        # Older torch: no dynamo argument, and the classic exporter is the
+        # only one anyway.
+        torch.onnx.export(model, inputs, onnx_path, **export_kwargs)
     print(f"  wrote {onnx_path} ({onnx_path.stat().st_size / 1024**2:.1f} MB)")
 
     # int8 roughly quarters the file and the resident footprint. Accuracy loss

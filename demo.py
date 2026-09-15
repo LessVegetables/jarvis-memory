@@ -90,6 +90,21 @@ def main():
     show("anton", "запомни, что я не ем острое")
     show(None, "запомни, что я не ем острое")
 
+    # Recalling a conversation from days ago. Needs the embedding model:
+    # past dialogue has no non-semantic fallback, since random old chatter
+    # is worse than nothing.
+    print("#" * 70)
+    print("# Recalling a past conversation (needs the embedding model)")
+    print("#" * 70)
+    memory.clear()
+    memory.record_answer(
+        "anton",
+        "Бобик что-то приболел, что делать?",
+        "Свози Бобика к ветеринару на Ленина, он открыт до восьми.",
+        now=NOW - timedelta(days=3),
+    )
+    show("anton", "как думаешь, Бобику уже лучше?")
+
 
 if __name__ == "__main__":
     main()

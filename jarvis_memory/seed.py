@@ -78,6 +78,7 @@ def seed(today: date | None = None) -> None:
     # searches would join against nothing and quietly return fewer results.
     if db.vec_available():
         conn.execute("DELETE FROM vec_facts")
+        conn.execute("DELETE FROM vec_dialogue")
 
     conn.executemany("INSERT INTO users (user_id, name, age) VALUES (?, ?, ?)", USERS)
 

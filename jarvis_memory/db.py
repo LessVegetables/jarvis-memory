@@ -89,6 +89,18 @@ def _load_vec(conn: sqlite3.Connection) -> None:
                embedding float[{DIM}]
            )"""
     )
+    # created_at is a metadata column, not a partition key: sqlite-vec can
+    # apply "created_at < ?" inside the nearest-neighbour search, so recent
+    # turns (already in the live history) are excluded before k is counted
+    # rather than filtered out afterwards, leaving fewer than k results.
+    conn.execute(
+        f"""CREATE VIRTUAL TABLE IF NOT EXISTS vec_dialogue USING vec0(
+               dialogue_id INTEGER PRIMARY KEY,
+               user_id TEXT partition key,
+               created_at INTEGER,
+               embedding float[{DIM}]
+           )"""
+    )
     _local.vec_enabled = True
 
 

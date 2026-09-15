@@ -47,6 +47,8 @@ def main() -> int:
               "on a laptop first, then copy models/ across.")
         return 1
 
+    ort.set_default_logger_severity(3)   # hide the "no GPU found" warning
+
     baseline = rss_mb()
     print(f"RSS before loading:   {baseline:7.1f} MB")
     print(f"Model file:           {model_path.stat().st_size / 1024**2:7.1f} MB"
@@ -82,10 +84,8 @@ def main() -> int:
         hidden = session.run(None, feed)[0]
         timings.append((time.perf_counter() - started) * 1000)
 
-        # Mean pooling over real tokens only -- padding must not drag the
-        # vector towards zero.
-        mask = feed["attention_mask"][..., None]
-        vector = (hidden * mask).sum(axis=1) / mask.sum(axis=1)
+        # CLS pooling, as the model was trained (see embeddings.py).
+        vector = hidden[:, 0, :]
         if sentence is sentences[0]:
             print(f"Embedding dimension:  {vector.shape[-1]:7d}")
 
