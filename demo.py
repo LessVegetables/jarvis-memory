@@ -12,12 +12,15 @@ command.
 The test phrases are Russian because that is what users will say.
 """
 
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
 
 import jarvis_memory as memory
+from jarvis_memory import db, seed
 
-# Fixed point in time so the demo output does not drift from day to day.
-NOW = datetime(2026, 9, 21, 14, 30)   # a Monday
+# Always a Monday at 14:30, computed from today rather than hardcoded, so it
+# lines up with the events the seed script generates for the current week.
+_TODAY = date.today()
+NOW = datetime.combine(_TODAY - timedelta(days=_TODAY.weekday()), time(14, 30))
 
 CASES = [
     ("anton", "какое у меня сегодня расписание?"),
@@ -40,6 +43,10 @@ def show(user_id, transcript):
 
 
 def main():
+    if not db.is_seeded():
+        print(f"Empty database, seeding {db.db_path()}\n")
+        seed.seed()
+
     for user_id, transcript in CASES:
         show(user_id, transcript)
 

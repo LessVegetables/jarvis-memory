@@ -48,14 +48,47 @@ there as `.system_prompt` — nothing is lost.
 | Interface, prompt templates, assembly | Done |
 | Dialogue history, "repeat" | Done |
 | Access control for an unrecognised speaker | Done |
-| User data | **Hardcoded** — step 2: SQLite |
+| User data in SQLite | Done |
 | Intent router | **Stub**, four regexes — step 4 |
-| Fact lookup (RAG) | **Stub**: returns the first 3 facts — step 5 |
+| Fact lookup (RAG) | **Stub**: returns 3 most recent facts, ignores the question — step 5 |
 | Weather, 2GIS | Not started — step 6 |
 
-The function signatures in `store.py` will not change — only their bodies
-will. Code written against them today keeps working after the move to a real
-database.
+The function signatures in `store.py` do not change — only their bodies do.
+Step 2 swapped hardcoded dicts for SQL queries without touching a single
+caller, and step 5 will swap the fact lookup for vector search the same way.
+
+## Database
+
+A single SQLite file, `jarvis.db`, no server process. Schema is in
+[`jarvis_memory/schema.sql`](jarvis_memory/schema.sql):
+
+| Table | Holds |
+|---|---|
+| `users` | `user_id`, name, age |
+| `events` | one row per calendar event: `starts_at` (ISO 8601 text), title, location |
+| `facts` | one short fact per row, for step 5 to retrieve by meaning |
+
+Fill it with development data:
+
+```
+python3 -m jarvis_memory.seed
+```
+
+Re-running wipes and refills. Events are generated **relative to today**,
+covering the current week and the next one — seeded with fixed dates they
+would go stale and the demo would quietly stop demonstrating anything.
+
+`jarvis.db` is gitignored. It is generated, not source.
+
+Three notes for whoever touches the schema next:
+
+- SQLite has no date type. `starts_at` is ISO 8601 text (`2026-09-21 16:00`),
+  which sorts and compares correctly as plain text and works with `date()`.
+- Step 5 does not change these tables. Embeddings go into a separate
+  `sqlite-vec` virtual table keyed by `facts.id`.
+- Voice embeddings are not in the schema yet: their dimension depends on
+  which extractor task B picks (ECAPA-TDNN is 192, WeSpeaker models vary).
+  Ask B before adding that table.
 
 ## Context budget
 
@@ -89,4 +122,5 @@ python3 demo.py
 ```
 
 Prints the prompts for several scenarios, including two different users
-asking the same question, and a multi-turn dialogue. No external dependencies.
+asking the same question, and a multi-turn dialogue. Seeds the database on
+first run. No external dependencies.
