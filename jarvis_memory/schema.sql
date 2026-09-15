@@ -14,15 +14,26 @@ CREATE TABLE IF NOT EXISTS users (
 -- starts_at is TEXT in ISO 8601 ('2026-09-21 16:00'). SQLite has no date
 -- type; ISO strings are the standard workaround because they sort and
 -- compare correctly as plain text, and date() understands them.
+--
+-- source says where a row came from: 'seed' for hand-written data, or a
+-- calendar id like 'ics:google' / 'caldav:icloud'. Sync replaces only its
+-- own source's rows, so seeded events survive it. uid is the calendar's
+-- own identifier; all_day rows render as "весь день" instead of "00:00".
+-- New columns are added to existing databases by db._migrate().
 CREATE TABLE IF NOT EXISTS events (
     id        INTEGER PRIMARY KEY,
     user_id   TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    source    TEXT NOT NULL DEFAULT 'seed',
+    uid       TEXT,
     starts_at TEXT NOT NULL,
+    ends_at   TEXT,
     title     TEXT NOT NULL,
-    location  TEXT
+    location  TEXT,
+    all_day   INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS events_by_user_day ON events(user_id, starts_at);
+CREATE INDEX IF NOT EXISTS events_by_source ON events(user_id, source, starts_at);
 
 -- One fact per row, one short sentence each. Deliberately not a "profile
 -- blob": step 5 retrieves these individually by meaning, and a paragraph

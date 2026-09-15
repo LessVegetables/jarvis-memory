@@ -1,0 +1,22 @@
+{
+  "_comment": "Copy to calendars.json (gitignored). Keys are user_ids from the users table.",
+
+  "anton": [
+    {
+      "type": "ics",
+      "name": "google",
+      "url": "https://calendar.google.com/calendar/ical/USER%40gmail.com/private-XXXXXXXX/basic.ics"
+    }
+  ],
+
+  "masha": [
+    {
+      "type": "caldav",
+      "name": "icloud",
+      "url": "https://caldav.icloud.com/",
+      "username": "masha@icloud.com",
+      "password_env": "MASHA_ICLOUD_APP_PASSWORD",
+      "calendars": ["Учёба", "Личное"]
+    }
+  ]
+}

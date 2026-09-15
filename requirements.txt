@@ -8,8 +8,10 @@
 #
 # Step 8 (weather, 2GIS): nothing -- urllib from the standard library.
 #
-# Step 9 (calendar):
-#   icalendar
+# Step 9 (calendar sync), on the board:
+#   icalendar               parses .ics
+#   recurring_ical_events   expands RRULEs (weekly lectures)
+#   caldav                  iCloud only; pulls requests + lxml (~10 MB)
 #
 # NEVER install these on the board: torch, transformers, sentence-transformers.
 # They are multi-gigabyte on ARM64 -- a fifth of the 15 GB disk -- and are only

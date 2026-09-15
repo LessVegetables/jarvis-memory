@@ -42,12 +42,13 @@ def get_schedule(user_id: str, day: date) -> list[tuple[str, str]]:
     against a whole day.
     """
     rows = db.connect().execute(
-        "SELECT starts_at, title, location FROM events "
+        "SELECT starts_at, title, location, all_day FROM events "
         "WHERE user_id = ? AND date(starts_at) = ? "
-        "ORDER BY starts_at",
+        "ORDER BY all_day DESC, starts_at",
         (user_id, day.isoformat()),
     ).fetchall()
-    return [(row["starts_at"][11:16], _describe(row)) for row in rows]
+    return [("весь день" if row["all_day"] else row["starts_at"][11:16], _describe(row))
+            for row in rows]
 
 
 def get_facts(user_id: str, transcript: str, limit: int = 3) -> list[str]:

@@ -45,10 +45,41 @@ def connect() -> sqlite3.Connection:
         # per-connection, not stored in the file. Without this, ON DELETE
         # CASCADE silently does nothing.
         conn.execute("PRAGMA foreign_keys = ON")
+        # Migrate BEFORE applying the schema: schema.sql creates indexes on
+        # columns that an older database does not have yet, and CREATE INDEX
+        # fails on a missing column where CREATE TABLE IF NOT EXISTS would
+        # have silently done nothing.
+        _migrate(conn)
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
         _load_vec(conn)
         _local.conn = conn
     return conn
+
+
+# Columns added after the first release. CREATE TABLE IF NOT EXISTS does
+# nothing for a table that already exists, so an existing jarvis.db on the
+# board would be missing them; ALTER TABLE ADD COLUMN fills them in. Every
+# entry needs a DEFAULT (or be nullable) for ALTER to accept it.
+_ADDED_COLUMNS = {
+    "events": {
+        "source": "TEXT NOT NULL DEFAULT 'seed'",
+        "uid": "TEXT",
+        "ends_at": "TEXT",
+        "all_day": "INTEGER NOT NULL DEFAULT 0",
+    },
+}
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    for table, columns in _ADDED_COLUMNS.items():
+        present = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if not present:
+            continue        # fresh database: schema.sql creates the table complete
+        for column, ddl in columns.items():
+            if column not in present:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+                log.info("migrated: %s.%s", table, column)
+    conn.commit()
 
 
 def _load_vec(conn: sqlite3.Connection) -> None:

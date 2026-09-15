@@ -54,6 +54,7 @@ there as `.system_prompt` — nothing is lost.
 | Fact lookup (RAG) | Done — semantic search, falls back to most-recent |
 | Dialogue archive and recall | Done — capped per user, semantic only |
 | Weather (weatherapi.com), places (2GIS) | Done — cached, degrade to a sentence on failure |
+| Calendar sync: Google (ICS), iCloud (CalDAV) | Done — on a timer, into `events` |
 
 The function signatures in `store.py` do not change — only their bodies do.
 Step 2 swapped hardcoded dicts for SQL queries without touching a single
@@ -67,7 +68,7 @@ A single SQLite file, `jarvis.db`, no server process. Schema is in
 | Table | Holds |
 |---|---|
 | `users` | `user_id`, name, age |
-| `events` | one row per calendar event: `starts_at` (ISO 8601 text), title, location |
+| `events` | one row per calendar event: `starts_at` (ISO 8601 text), title, location, `source` (`seed` or a calendar id), `all_day` |
 | `facts` | one short fact per row, retrieved by meaning |
 | `vec_facts` | fact embeddings (virtual table, sqlite-vec) |
 | `dialogue` | every exchange with a recognised speaker, capped at 500 per user |
@@ -132,6 +133,34 @@ matters so teammates can work without copying a model around.
 Search is scoped per user by a sqlite-vec *partition key*, not by filtering
 afterwards: the nearest k rows globally could easily be someone else's, which
 would leak one housemate's facts into another's answer.
+
+## Calendar sync
+
+Google and iCloud calendars are pulled into the `events` table on a timer.
+**The request path never talks to a calendar server** — `get_schedule` is
+the same SQL lookup it was in step 2, fast, and working when the wifi is
+not. Sources go in a gitignored `calendars.json` (see the example file):
+
+| Provider | How | What you need |
+|---|---|---|
+| Google | its *secret address in iCal format* — a plain HTTPS GET | Calendar settings → Integrate calendar → copy the private `.ics` URL |
+| iCloud | CalDAV via the `caldav` library | an **app-specific password** from appleid.apple.com — the account password will not work with two-factor on |
+
+Google's CalDAV endpoint wants OAuth, which costs a day of setup for
+nothing the ICS address does not already give for reading. So Google is
+ICS, iCloud is CalDAV, and both produce the same `Event` rows.
+
+```bash
+python3 tools/sync_calendars.py            # once, by hand
+*/15 * * * * cd ~/jarvis-memory && python3 tools/sync_calendars.py >> sync.log 2>&1
+```
+
+Each sync **replaces** the two-week window for its own `(user, source)`:
+deleted and moved events disappear, hand-seeded rows (`source='seed'`)
+are never touched, and one calendar failing does not stop the others.
+Recurring events are expanded client-side for both providers. Times are
+converted to the device's local zone, so set it:
+`sudo timedatectl set-timezone Europe/Moscow` (or wherever the kitchen is).
 
 ## Live data: weather and places
 
@@ -219,6 +248,9 @@ pattern in `router.py`.
 - History for unrecognised speakers is shared between all of them.
 - Only relative days are understood (сегодня / завтра / послезавтра /
   вчера). «в пятницу» and «на выходных» are not.
+- Calendar events are matched to a day by their local start time, so an
+  event starting at 01:00 Moscow time on a board set to UTC lands on the
+  previous day. Set the board's timezone.
 - Fact extraction is a prefix strip, so «запомни, что мне не нравится X»
   is stored in first person as said, not normalised to the user's name.
 - Recalled dialogue is matched on the exchange as a whole; a very long
@@ -238,6 +270,7 @@ python3 demo.py                # prints real prompts for every intent
 python3 tests/test_router.py   # routing and fact extraction
 python3 tests/test_rag.py      # retrieval plumbing (uses a stand-in embedder)
 python3 tests/test_providers.py   # weather and places, with canned API payloads
+python3 tests/test_calendar.py    # ICS parsing, sync, migration (needs icalendar + recurring_ical_events)
 # or, if you have it:  python3 -m pytest tests/ -q
 ```
 
