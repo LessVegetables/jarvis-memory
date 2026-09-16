@@ -59,14 +59,36 @@ def main() -> int:
         opset_version=14,
     )
     inputs = (sample["input_ids"], sample["attention_mask"], sample["token_type_ids"])
+
+    # Both exporters call the wrapped module with a mix of positional and
+    # keyword arguments. transformers >= 5 adds arguments to
+    # BertModel.forward() that then collide with the positional ones
+    # ("got multiple values for argument 'use_cache'"). The wrapper pins the
+    # three inputs we actually export by name, so the export no longer
+    # depends on the argument ORDER of somebody else's forward().
+    class EmbedWrapper(torch.nn.Module):
+        def __init__(self, inner):
+            super().__init__()
+            self.inner = inner
+
+        def forward(self, input_ids, attention_mask, token_type_ids):
+            return self.inner(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                token_type_ids=token_type_ids,
+            ).last_hidden_state
+
+    wrapper = EmbedWrapper(model).eval()
+
     try:
         # torch >= 2.5 defaults to a new exporter that needs the onnxscript
         # package; dynamo=False selects the classic one, which does not.
-        torch.onnx.export(model, inputs, onnx_path, dynamo=False, **export_kwargs)
-    except TypeError:
-        # Older torch: no dynamo argument, and the classic exporter is the
-        # only one anyway.
-        torch.onnx.export(model, inputs, onnx_path, **export_kwargs)
+        torch.onnx.export(wrapper, inputs, onnx_path, dynamo=False, **export_kwargs)
+    except (TypeError, RuntimeError):
+        # Older torch: no dynamo argument. Newer torch (>= 2.9): the classic
+        # exporter is gone and dynamo=False falls back to the new one anyway,
+        # which needs onnxscript installed.
+        torch.onnx.export(wrapper, inputs, onnx_path, **export_kwargs)
     print(f"  wrote {onnx_path} ({onnx_path.stat().st_size / 1024**2:.1f} MB)")
 
     # int8 roughly quarters the file and the resident footprint. Accuracy loss
