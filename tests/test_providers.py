@@ -158,9 +158,11 @@ def test_places_renders_distance_and_hours():
     base.fetch_json = FakeFetch(PLACES_PAYLOAD)
     text = places.block("до скольки работает аптека?", NOW)
     assert text.startswith("Места поблизости по запросу «аптека»"), text
-    assert ("- Аптека Вита, ул. Ленина, 5, двести семьдесят метров, "
+    # The house number joins the street without a comma: spoken, that pause
+    # splits one name in two -- "Морской проспект... шесть".
+    assert ("- Аптека Вита, ул. Ленина 5, двести семьдесят метров, "
             "сегодня с восьми до двадцати двух") in text, text
-    assert ("Аптека 24, пр. Мира, 10, восемьсот девяносто метров, "
+    assert ("Аптека 24, пр. Мира 10, восемьсот девяносто метров, "
             "круглосуточно") in text, text
     assert "- Аптека без графика, прямо у дома" in text, text
 

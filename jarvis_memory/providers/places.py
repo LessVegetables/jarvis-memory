@@ -43,6 +43,24 @@ _ASKING = re.compile(
 )
 _PUNCT = re.compile(r"[?!.,;:«»\"']")
 
+# 2GIS writes addresses as "<улица>, <дом>". Spoken, that comma is a pause in
+# the middle of a single name: "Морской проспект... шесть". Nobody says the
+# street and the house number as two things. The last segment must start with
+# a digit, so "Морской проспект, 6, офис 12" keeps the comma it needs.
+_HOUSE_NUMBER = re.compile(r",\s*(\d[^,]*)$")
+# "6к1" / "6с2" -- corpus and building, written short and said long.
+_HOUSE_SUFFIX = re.compile(r"(\d)\s*(к|корп\.?|с|стр\.?)\s*(\d)", re.IGNORECASE)
+_SUFFIX_WORDS = {"к": "корпус", "корп": "корпус", "с": "строение", "стр": "строение"}
+
+
+def _address(name: str) -> str:
+    """2GIS's address, as a person would read it out."""
+    name = _HOUSE_NUMBER.sub(r" \1", name.strip())
+    return _HOUSE_SUFFIX.sub(
+        lambda m: f"{m.group(1)} {_SUFFIX_WORDS[m.group(2).lower().rstrip('.')]} "
+                  f"{m.group(3)}",
+        name)
+
 _WEEKDAY_KEYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
@@ -114,7 +132,7 @@ def _render_item(item: dict, lat: float, lon: float, now: datetime) -> str:
     name = item.get("name") or "(без названия)"
     parts = [name]
     if item.get("address_name"):
-        parts.append(item["address_name"])
+        parts.append(_address(item["address_name"]))
     point = item.get("point") or {}
     if "lat" in point and "lon" in point:
         parts.append(_distance_phrase(lat, lon, point["lat"], point["lon"]))

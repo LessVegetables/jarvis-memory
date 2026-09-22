@@ -316,6 +316,12 @@ _RE_INTEGER = re.compile(r"\d+")
 _LEFTOVERS = [("°", " градусов"), ("%", " процентов"), ("№", "номер "),
               ("&", " и "), ("=", " равно ")]
 _RE_GAP = re.compile(r"[ \t]{2,}")
+# A digit touching a letter: "6к1" would otherwise come out "шестькодин",
+# and "10км" would never be recognised as a measurement.
+_RE_GLUED = re.compile(r"(?<=[^\W\d_])(?=\d)|(?<=\d)(?=[^\W\d_])")
+# "10/2" -- a house number or a fraction. Either way it is read "дробь",
+# and the slash itself must not survive into the speech synthesiser.
+_RE_SLASH = re.compile(r"(\d)\s*/\s*(\d)")
 
 
 def _decimal_words(whole: str, fraction: str) -> str:
@@ -361,12 +367,15 @@ def spell(text: str) -> str:
     if not text:
         return text
     try:
+        # First, because it is what makes "10км" a measurement and not a word.
+        text = _RE_GLUED.sub(" ", text)
         text = _RE_TIME_RANGE.sub(
             lambda m: time_range(m.group(1), m.group(2)), text)
         text = _RE_TIME.sub(lambda m: time_words(m.group(1)), text)
         text = _RE_DATE.sub(_spell_date, text)
         text = _RE_TEMPERATURE.sub(_spell_temperature, text)
         text = _RE_UNIT.sub(_spell_unit, text)
+        text = _RE_SLASH.sub(r"\1 дробь \2", text)
         text = _RE_DECIMAL.sub(
             lambda m: _decimal_words(m.group(1), m.group(2)), text)
         text = _RE_DIGIT_RUN.sub(

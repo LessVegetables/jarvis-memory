@@ -81,6 +81,11 @@ SPELL_CASES = [
     ("2,5 л", "две целых пять десятых литра"),
     # room numbers and other bare integers
     ("ауд. 305", "ауд. триста пять"),
+    # a digit glued to a letter must not glue the words together
+    ("дом 6к1", "дом шесть к один"),
+    ("10км", "десять километров"),
+    # a slash is a special symbol the synthesiser cannot say
+    ("Мира 10/2", "Мира десять дробь два"),
     # long runs are phone numbers, read digit by digit
     ("звони 89991234567",
      "звони восемь девять девять девять один два три четыре пять шесть семь"),
