@@ -30,17 +30,27 @@ from jarvis_memory.providers import spotify  # noqa: E402
 
 NOW = datetime(2026, 9, 14, 14, 30)
 
+# setup() below swaps _api out for a fake and never puts it back, so the one
+# test that exercises the real response parsing has to restore this.
+_REAL_API = spotify._api
+
 # Shaped like a real answer to "ЛСП": the artist is there, and so are tracks
 # by them. Which one is right depends entirely on what was asked.
+# Taken from what the real API returns. The trap is "Группа Крови": there is
+# an obscure band by that name AND a famous Кино song, and only popularity
+# tells them apart.
 SEARCH = {
     "artists": {"items": [
-        {"name": "ЛСП", "uri": "spotify:artist:lsp"},
-        {"name": "Кинотеатр", "uri": "spotify:artist:kinoteatr"},
+        {"name": "ЛСП", "uri": "spotify:artist:lsp", "popularity": 62},
+        {"name": "Группа Крови", "uri": "spotify:artist:gk", "popularity": 12},
+        {"name": "Кинотеатр", "uri": "spotify:artist:kinoteatr", "popularity": 30},
     ]},
     "tracks": {"items": [
         None,                                    # the API really does pad with these
-        {"name": "Группа крови", "uri": "spotify:track:abc",
+        {"name": "Группа крови", "uri": "spotify:track:abc", "popularity": 68,
          "artists": [{"name": "Кино"}]},
+        {"name": "ЛСП", "uri": "spotify:track:lsptrack", "popularity": 4,
+         "artists": [{"name": "Кто-то"}]},
     ]},
     "albums": {"items": [{"name": "Свежая кровь", "uri": "spotify:album:blood"}]},
     "playlists": {"items": [{"name": "Чужой плейлист",
@@ -66,6 +76,7 @@ class FakeApi:
                  liked=LIKED, volume=40, playing=None):
         self.playlists, self.search, self.error_on = playlists, search, error_on
         self.liked, self.volume = liked, volume
+        self.supports_volume = True
         self.playing = {"item": {"name": "Группа крови",
                                  "artists": [{"name": "Кино"}]}} if playing is None \
             else playing
@@ -82,7 +93,8 @@ class FakeApi:
         if path == "/search":
             return self.search
         if path == "/me/player":
-            return {"device": {"volume_percent": self.volume}}
+            return {"device": {"volume_percent": self.volume,
+                               "supports_volume": self.supports_volume}}
         if path == "/me/player/currently-playing":
             return self.playing
         return {}
@@ -197,12 +209,23 @@ def test_an_artist_is_played_as_an_artist():
     assert "ЛСП" in text, text
 
 
-def test_a_song_is_still_played_as_a_song():
-    """No artist is called "Группа крови", so the track has to win."""
+def test_a_famous_song_beats_an_obscure_band_of_the_same_name():
+    """Found against the real catalogue: there IS a band called "Группа
+    Крови", and preferring the artist outright played their top track
+    instead of the Кино song everyone means."""
     api = setup()
     spotify.block("включи Группа крови", NOW)
     assert ("PUT", "/me/player/play",
-            {"uris": ["spotify:track:abc"]}) in api.calls
+            {"uris": ["spotify:track:abc"]}) in api.calls, api.calls
+
+
+def test_a_famous_band_beats_an_obscure_song_of_the_same_name():
+    """The mirror case, which is why this is popularity and not a rule that
+    tracks always win."""
+    api = setup()
+    spotify.block("включи ЛСП", NOW)
+    assert ("PUT", "/me/player/play",
+            {"context_uri": "spotify:artist:lsp"}) in api.calls, api.calls
 
 
 def test_an_artist_must_match_exactly():
@@ -291,6 +314,56 @@ def test_any_other_failure_is_admitted():
     assert spotify.block("включи музыку", NOW) == prompts.MUSIC_UNAVAILABLE
 
 
+def test_a_device_that_refuses_volume_says_so():
+    """Phones and web players answer 403 to a volume change. Saying "не
+    получается" would be true and useless; this says what to do instead."""
+    api = setup(FakeApi(volume=40))
+    api.supports_volume = False
+    assert spotify.block("погромче", NOW) == prompts.MUSIC_VOLUME_UNSUPPORTED
+
+
+# --- the HTTP layer itself ----------------------------------------------------
+# FakeApi above replaces _api wholesale, so nothing so far exercises the
+# response parsing -- which is exactly where the bug was that reported
+# failure for commands Spotify had already carried out.
+
+class FakeResponse:
+    def __init__(self, status, body):
+        self.status, self._body = status, body
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def test_empty_responses_are_success_not_a_parse_error():
+    """pause and next answer 204, sometimes with a newline for a body.
+
+    Reported as a failure, this is the worst outcome available: the music
+    stopped and the assistant said it could not stop it.
+    """
+    import urllib.request
+    spotify._api = _REAL_API
+    spotify._token = ("tok", datetime(2099, 1, 1))
+    original = urllib.request.urlopen
+    try:
+        for status, body in ((204, b""), (200, b""), (200, b"\n"), (200, b"   ")):
+            urllib.request.urlopen = lambda *a, **kw: FakeResponse(status, body)
+            assert spotify._api("PUT", "/me/player/pause") == {}, (status, body)
+
+        urllib.request.urlopen = lambda *a, **kw: FakeResponse(
+            200, b'{"ok": true}')
+        assert spotify._api("GET", "/me/player") == {"ok": True}
+    finally:
+        urllib.request.urlopen = original
+        spotify._token = None
+
+
 # --- through build_context ----------------------------------------------------
 
 def test_music_reaches_the_prompt_and_works_for_a_guest():
@@ -316,7 +389,8 @@ TESTS = [
     test_empty_library_falls_back_to_a_playlist,
     test_a_named_playlist_still_wins_over_the_catalogue,
     test_an_artist_is_played_as_an_artist,
-    test_a_song_is_still_played_as_a_song,
+    test_a_famous_song_beats_an_obscure_band_of_the_same_name,
+    test_a_famous_band_beats_an_obscure_song_of_the_same_name,
     test_an_artist_must_match_exactly,
     test_album_is_used_when_there_is_no_track,
     test_quieter_turns_it_down_rather_than_off,
@@ -327,6 +401,8 @@ TESTS = [
     test_bare_music_request_resumes_instead_of_searching,
     test_pause_next_previous,
     test_no_active_device_says_to_open_the_app,
+    test_a_device_that_refuses_volume_says_so,
+    test_empty_responses_are_success_not_a_parse_error,
     test_missing_credentials_say_so_rather_than_failing,
     test_nothing_found_is_not_reported_as_success,
     test_any_other_failure_is_admitted,

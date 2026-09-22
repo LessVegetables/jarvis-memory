@@ -151,12 +151,26 @@ def _set_volume(louder: bool) -> str:
     it -- Spotify only takes an absolute percentage.
     """
     state = _api("GET", "/me/player")
-    current = ((state.get("device") or {}).get("volume_percent"))
+    device = state.get("device") or {}
+    current = device.get("volume_percent")
     if current is None:
         raise NoActiveDevice
+
+    # Plenty of Connect targets -- phones, some speakers, the web player --
+    # refuse remote volume and answer 403. Spotify says so up front in
+    # supports_volume, so ask rather than fail and guess afterwards.
+    if device.get("supports_volume") is False:
+        return prompts.MUSIC_VOLUME_UNSUPPORTED
+
     step = VOLUME_STEP if louder else -VOLUME_STEP
     target = max(0, min(100, int(current) + step))
-    _command("PUT", "/me/player/volume", params={"volume_percent": target})
+    try:
+        _command("PUT", "/me/player/volume", params={"volume_percent": target})
+    except urllib.error.HTTPError as exc:
+        if exc.code == 403:
+            # supports_volume was absent or wrong. Same outcome either way.
+            return prompts.MUSIC_VOLUME_UNSUPPORTED
+        raise
     return prompts.MUSIC_LOUDER_BLOCK if louder else prompts.MUSIC_QUIETER_BLOCK
 
 
@@ -228,26 +242,51 @@ def _search(query: str) -> tuple[str, dict] | None:
     listening session rather than one song and then silence.
     """
     results = _api("GET", "/search", params={
-        "q": query, "type": "artist,track,album,playlist", "limit": 5,
+        "q": query, "type": "artist,track,album,playlist", "limit": 10,
     })
     wanted = _plain(query)
 
-    for artist in _items(results, "artists"):
-        if _plain(artist.get("name", "")) == wanted:
-            return artist["name"], {"context_uri": artist["uri"]}
+    # An exact name can be both an act and a song: there is a band called
+    # "Группа Крови" AND a Кино song of that name, and "включи Группа крови"
+    # means the song. Preferring the artist outright played the wrong one --
+    # the band's top tracks, starting with something else entirely.
+    #
+    # Popularity settles it, and settles the mirror case too: an obscure
+    # track called "ЛСП" must not outrank the act everyone means by it. Both
+    # numbers are Spotify's own 0-100 scale, so they compare directly.
+    artist = _best_named(results, "artists", wanted)
+    track = _best_named(results, "tracks", wanted)
+    if artist and track:
+        if artist.get("popularity", 0) >= track.get("popularity", 0):
+            track = None
+        else:
+            artist = None
 
-    for track in _items(results, "tracks"):
-        artists = ", ".join(a["name"] for a in track.get("artists") or []
-                            if a.get("name"))
-        name = f"{track['name']} — {artists}" if artists else track["name"]
-        return name, {"uris": [track["uri"]]}
+    if artist:
+        return artist["name"], {"context_uri": artist["uri"]}
+    if track:
+        return _track_name(track), {"uris": [track["uri"]]}
 
-    for album in _items(results, "albums"):
-        return album["name"], {"context_uri": album["uri"]}
-
-    for playlist in _items(results, "playlists"):
-        return playlist["name"], {"context_uri": playlist["uri"]}
+    for item in _items(results, "tracks"):
+        return _track_name(item), {"uris": [item["uri"]]}
+    for item in _items(results, "albums"):
+        return item["name"], {"context_uri": item["uri"]}
+    for item in _items(results, "playlists"):
+        return item["name"], {"context_uri": item["uri"]}
     return None
+
+
+def _best_named(results: dict, kind: str, wanted: str) -> dict | None:
+    """The most popular result of this kind whose name is exactly `wanted`."""
+    matches = [item for item in _items(results, kind)
+               if _plain(item.get("name", "")) == wanted]
+    return max(matches, key=lambda i: i.get("popularity", 0)) if matches else None
+
+
+def _track_name(track: dict) -> str:
+    artists = ", ".join(a["name"] for a in track.get("artists") or []
+                        if a.get("name"))
+    return f"{track['name']} — {artists}" if artists else track["name"]
 
 
 def _items(results: dict, kind: str) -> list[dict]:
@@ -361,8 +400,17 @@ def _api(method: str, path: str, body: dict | None = None,
         "Content-Type": "application/json",
     })
     with urllib.request.urlopen(request, timeout=config.http_timeout()) as response:
-        raw = response.read()
-    return json.loads(raw.decode("utf-8")) if raw else {}
+        status, raw = response.status, response.read()
+
+    # The player commands answer 204 with no body -- and sometimes with a
+    # body of one newline, which is why this tests the stripped bytes and not
+    # merely truthiness. Getting that wrong made pause and next report
+    # failure for commands Spotify had already carried out, which is worse
+    # than failing: the music stopped and the assistant said it could not
+    # stop it.
+    if status == 204 or not raw.strip():
+        return {}
+    return json.loads(raw.decode("utf-8"))
 
 
 def _command(method: str, path: str, body: dict | None = None,
