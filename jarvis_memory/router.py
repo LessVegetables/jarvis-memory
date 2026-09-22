@@ -88,6 +88,14 @@ def route(transcript: str, previous_intent: str | None = None) -> str:
         if re.search(pattern, text):
             return intent
 
+    # "А это далеко?" names no place, so nothing above matches it, and it is
+    # not short enough to be a bare follow-up either. It is still obviously
+    # about the place just discussed -- but only if a place was just
+    # discussed, which is what the guard is for: with no such turn behind it,
+    # "это далеко?" really is anyone's guess and GENERAL is the honest answer.
+    if previous_intent == PLACES and re.search(_DISTANCE, text):
+        return PLACES
+
     if previous_intent and previous_intent != GENERAL and _is_followup(text):
         return previous_intent
 
@@ -145,14 +153,19 @@ PLACE_ADDRESS = "address"
 PLACE_LIST = "list"
 PLACE_NEAREST = "nearest"                # the default: no qualifier means "which one"
 
+# "далеко ли это", "сколько до неё идти" -- a distance question that names no
+# place. Used twice: to pick the shape, and by route() to recognise the same
+# phrase as a follow-up on a place named a turn ago.
+_DISTANCE = (r"\bдалеко\b|\bсколько (до|метров|километров|идти)"
+             r"|\bдолго (ли )?идти|\bблизко (ли )?(это|она|он)")
+
 # First match wins, as in _PATTERNS. The order is the whole design here --
 # the confusable phrasings all contain the keyword of a shape they do not
 # mean, so the more specific question has to be asked first.
 _PLACE_SHAPES: list[tuple[str, str]] = [
     # Checked first because it is the only one that needs no search at all:
     # it is about a place named in the previous turn.
-    (PLACE_DISTANCE, r"\bдалеко\b|\bсколько (до|метров|километров|идти)"
-                     r"|\bдолго (ли )?идти|\bблизко (ли )?(это|она|он)"),
+    (PLACE_DISTANCE, _DISTANCE),
 
     # Before PLACE_NEAREST, because "во сколько откроется ближайшая аптека"
     # says "ближайшая" and is not asking which one is nearest.

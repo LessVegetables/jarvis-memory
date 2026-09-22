@@ -1,10 +1,26 @@
 """
 Context assembly -- the core of module C.
 
-There is not a single language-model call in this file. Everything
-build_context does is a handful of data lookups and some string substitution.
-The one LLM inference in the whole chain happens later and elsewhere: the
-orchestrator takes the finished messages and hands them to Qwen exactly once.
+This file used to say it contained no language-model call at all. That is no
+longer true, and the exception is worth stating precisely, because the rule it
+breaks was a good one.
+
+Everything build_context does is still data lookup and string substitution.
+The model is never asked what the answer is, never asked to choose between
+records, and never asked to compare anything: providers and store decide, the
+prompt states, and the one inference the orchestrator runs afterwards only
+puts the finished facts into a sentence.
+
+The exception is deciding what was *asked*. When router.route() matches
+nothing -- not the topic patterns, not the follow-up rules -- the alternative
+to asking the model is GENERAL, which means the question gets answered with
+no data at all. So on that path, and only on that path, llm_intent.classify()
+gets a turn. It is a rescue attempt on input that has already failed
+everything cheaper; if it fails too, the result is the GENERAL the caller
+would have used anyway. See llm_intent.py for why it is shaped the way it is.
+
+So the honest version of the old sentence: one language-model call, on the
+path where there was nothing to lose, and never to decide an answer.
 """
 
 from __future__ import annotations
@@ -13,7 +29,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
-from . import history, num_to_words, prompts, router, store
+from . import history, llm_intent, num_to_words, prompts, router, store
 from .providers import places, weather
 
 log = logging.getLogger(__name__)
@@ -75,6 +91,10 @@ def build_context(user_id: str | None, transcript: str,
     # ("а тренировка?") stays on the previous topic instead of falling
     # through to GENERAL, then record the new intent for the next turn.
     intent = router.route(transcript, history.get_last_intent(user_id, now=now))
+    if intent == router.GENERAL:
+        # Nothing matched -- not a topic, not a follow-up. Ask the model
+        # before giving up; GENERAL is what we keep if it cannot help.
+        intent = llm_intent.classify(transcript) or router.GENERAL
     history.set_last_intent(user_id, intent, now=now)
     profile = store.get_profile(user_id) if user_id else None
 

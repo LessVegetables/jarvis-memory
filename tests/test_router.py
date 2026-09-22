@@ -80,6 +80,20 @@ CASES = [
     ("а завтра?", None, router.GENERAL),
     ("а завтра?", router.GENERAL, router.GENERAL),
 
+    # --- distance follow-ups: "а это далеко?" names no place ---
+    # Nothing in the phrase says it is about a place. What says so is that
+    # the previous turn was, which is why the rule is guarded on it.
+    ("а это далеко?", router.PLACES, router.PLACES),
+    ("это далеко?", router.PLACES, router.PLACES),
+    ("сколько до нее идти", router.PLACES, router.PLACES),
+    ("сколько километров до нее", router.PLACES, router.PLACES),
+    ("а сколько метров", router.PLACES, router.PLACES),
+
+    # Without a place behind it the same phrase is anyone's guess, and
+    # guessing PLACES would send it off to search 2GIS for nothing.
+    ("это далеко?", None, router.GENERAL),
+    ("сколько до нее идти", router.WEATHER, router.GENERAL),
+
     # --- ё folding: STT output is inconsistent about it ---
     ("ещё раз", None, router.REPEAT),
     ("еще раз", None, router.REPEAT),
