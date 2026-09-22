@@ -29,6 +29,7 @@ WEATHER = "weather"
 REPEAT = "repeat"
 REMEMBER = "remember"
 PLACES = "places"
+MUSIC = "music"
 GENERAL = "general"     # nothing matched -- ordinary conversation
 
 # Order matters: the first match wins. REMEMBER and REPEAT come first
@@ -38,6 +39,13 @@ GENERAL = "general"     # nothing matched -- ordinary conversation
 _PATTERNS: list[tuple[str, str]] = [
     (REMEMBER, r"\bзапомни|\bзаметь\b|\bне забудь|\bзапиши\b"),
     (REPEAT, r"\bповтор|\bчто ты сказал|\bеще раз\b|\bне расслышал|\bчто-что\b"),
+    # Before the topic patterns: "поставь песню про дождь" is a music command
+    # that happens to contain a weather word, and "включи что-нибудь из моего
+    # расписания" is not a thing anyone says.
+    (MUSIC, (r"\bвключ[иь]\b|\bпоставь\b|\bвруб[иа]|\bзапусти\b|\bиграй\b"
+             r"|\bсыграй\b|\bмузык|\bпесн[юяи]|\bплейлист|\bтрек\b"
+             r"|\bследующ\w+ (песн|трек)|\bпереключи\b"
+             r"|\b(пауза|останови|выключи|стоп)\b")),
     (SCHEDULE, (r"\bраспис|\bпланы\b|\bчто у меня\b|\bво сколько у меня\b"
                 r"|\bкогда у меня\b|\bчем я занят|\bсвободен\b|\bвстреч"
                 r"|\bпар[ыа]\b|\bлекци|\bзаняти|\bтренировк")),
@@ -66,7 +74,7 @@ _FOLLOWUP_MAX_WORDS = 4      # with a leading conjunction: "а что завтр
 # needs morphology (a verb in the imperative starts something new), which
 # would mean another dependency; an explicit list is honest and costs nothing.
 _FOLLOWUP_BARE = (r"^\s*(завтра|послезавтра|сегодня|вчера|позавчера"
-                  r"|там|тут|здесь|потом)\s*\??\s*$")
+                  r"|там|тут|здесь|потом|дальше)\s*\??\s*$")
 
 
 def normalise(text: str) -> str:
@@ -208,6 +216,61 @@ def place_shape(transcript: str) -> str:
         if re.search(pattern, text):
             return shape
     return PLACE_NEAREST
+
+
+# --- which playback command was given ---------------------------------------
+# Same division of labour as place_shape: regexes decide, the model phrases.
+# There is nothing here a model would do better -- "поставь на паузу" is not
+# an ambiguous sentence.
+MUSIC_PLAY = "play"
+MUSIC_PAUSE = "pause"
+MUSIC_NEXT = "next"
+MUSIC_PREVIOUS = "previous"
+
+_MUSIC_ACTIONS: list[tuple[str, str]] = [
+    # Before pause, because "переключи" and "следующий" are also commands to
+    # a player that is currently running.
+    (MUSIC_NEXT, r"\bследующ|\bдальше\b|\bпереключи\b|\bдругую песню"),
+    (MUSIC_PREVIOUS, r"\bпредыдущ|\bверни\b|\bназад\b|\bпрошл[ую]\w* песню"),
+    (MUSIC_PAUSE, r"\bпауз|\bостанови|\bвыключи\b|\bстоп\b|\bхватит\b"
+                  r"|\bзаткнись\b|\bтише\b"),
+]
+
+
+def music_action(transcript: str) -> str:
+    """Which playback command. Defaults to MUSIC_PLAY."""
+    text = normalise(transcript)
+    for action, pattern in _MUSIC_ACTIONS:
+        if re.search(pattern, text):
+            return action
+    return MUSIC_PLAY
+
+
+# The command verb and the filler around it. What is left is what to play.
+_MUSIC_COMMAND = re.compile(
+    r"\b(включи|включь|поставь|врубай|вруби|запусти|играй|сыграй|"
+    r"пожалуйста|мне|нам|давай|ну|а|и)\b")
+# Asking for "music" is asking for no particular thing: resume what was on.
+_MUSIC_ANY = re.compile(r"^(музыку|музыка|музыки|что-нибудь|что нибудь|"
+                        r"песню|песня|трек|любую|любое)?$")
+
+
+def music_query(transcript: str) -> str:
+    """'включи мой любимый плейлист' -> 'мой любимый плейлист'.
+
+    Empty means no particular thing was named, which is a request to resume
+    rather than to search -- "включи музыку" should not go looking for a band
+    called Музыка.
+
+    A prefix strip, like extract_fact: routing it through the model would
+    double the latency of every playback command to reword an imperative.
+    """
+    text = _PUNCT_MUSIC.sub(" ", normalise(transcript))
+    text = " ".join(_MUSIC_COMMAND.sub(" ", text).split())
+    return "" if _MUSIC_ANY.match(text) else text
+
+
+_PUNCT_MUSIC = re.compile(r"[?!.,;:«»\"']")
 
 
 # Which day a schedule question is about. Longest forms first: "послезавтра"

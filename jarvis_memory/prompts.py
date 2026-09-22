@@ -118,5 +118,26 @@ PLACE_DISTANCE_UNKNOWN = ('Тебя спрашивают, далеко ли эт
 # with a hole in it is answered with an invention.
 PLACE_NO_HOURS = 'Часы работы места «{name}» неизвестны. Скажи об этом.'
 PLACE_NO_ADDRESS = 'Адрес места «{name}» неизвестен. Скажи об этом.'
+# --- music (Spotify) --------------------------------------------------------
+# By the time the model sees any of these the command has already run, exactly
+# as with REMEMBER above. Its job is to confirm, not to decide -- so none of
+# them offers it a choice, and the failures each say what actually happened
+# rather than leaving it to guess.
+MUSIC_PLAYING = 'Ты включил «{name}». Коротко подтверди это.'
+MUSIC_RESUMED = 'Ты продолжил воспроизведение. Коротко подтверди это.'
+MUSIC_PAUSED = 'Ты поставил музыку на паузу. Коротко подтверди это.'
+MUSIC_NEXT_BLOCK = 'Ты переключил на следующий трек. Коротко подтверди это.'
+MUSIC_PREVIOUS_BLOCK = 'Ты вернулся к предыдущему треку. Коротко подтверди это.'
+
+MUSIC_NO_KEY = ('Музыка: сервис не настроен, доступа к Spotify нет. '
+                'Скажи, что пока не можешь включать музыку.')
+MUSIC_NOT_FOUND = 'Ничего похожего на «{query}» найти не удалось. Скажи об этом.'
+# The one that actually happens: Spotify refuses to start playback unless the
+# app is already open somewhere. Worth its own sentence, because "сервис не
+# отвечает" would point at the wrong problem entirely.
+MUSIC_NO_DEVICE = ('Spotify не открыт ни на одном устройстве, поэтому включить '
+                   'музыку не получилось. Попроси открыть приложение.')
+MUSIC_UNAVAILABLE = 'Управлять музыкой сейчас не получается. Скажи об этом честно.'
+
 PLACE_NO_RATING = ('Оценок и отзывов нет. Ближайшее подходящее место — '
                    '«{name}». Скажи об этом.')

@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 
 from . import history, llm_intent, num_to_words, prompts, router, store
-from .providers import places, weather
+from .providers import places, spotify, weather
 
 log = logging.getLogger(__name__)
 
@@ -103,7 +103,12 @@ def build_context(user_id: str | None, transcript: str,
     # Public blocks first: anyone in the kitchen may ask about the weather
     # or what is nearby, recognised or not.
     blocks: list[str] = []
-    if intent == router.WEATHER:
+    if intent == router.MUSIC:
+        # Like REMEMBER below, this one acts before the model speaks: the
+        # command has already run by the time the block is written, and the
+        # block says what happened.
+        blocks.append(spotify.block(transcript, now))
+    elif intent == router.WEATHER:
         blocks.append(weather.block(transcript, now))
     elif intent == router.PLACES:
         # The answer carries the one place it named, if it named one. Holding
