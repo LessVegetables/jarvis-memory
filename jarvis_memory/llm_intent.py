@@ -167,3 +167,59 @@ def _ask(system: str, user: str, max_tokens: int = MAX_TOKENS) -> str | None:
         # otherwise print a stack trace on every unrecognised phrase.
         log.debug("llm intent call failed", exc_info=True)
         return None
+
+
+# --- pulling a name out of a sentence ----------------------------------------
+
+SUBJECT_PROMPT = """\
+Человек говорит, что ему не нравится какое-то место.
+Напиши только название этого места, одно или два слова.
+Без объяснений, без кавычек, без лишних слов."""
+
+
+def extract_subject(text: str) -> str | None:
+    """The name of the disliked place in `text`, or None. Never raises.
+
+    The one thing here the regexes genuinely cannot do. Detecting that "не
+    предлагай мне аптеку Экона" is a dislike is a keyword test, and
+    router.is_dislike does it. But filtering needs the *thing* -- "Экона" --
+    and a prefix strip returns the whole sentence, which matches no business
+    name at all.
+
+    Extraction rather than reasoning, which is the shape small models are
+    reliable at: the answer is already in the input, and the model only has to
+    find it and say it back.
+
+    A None here is cheap. The fact is still stored, still searchable, still
+    recited when relevant; it just does not silently filter anything.
+    """
+    if not enabled() or not text.strip():
+        return None
+    reply = _ask(SUBJECT_PROMPT, text, max_tokens=12)
+    if reply is None:
+        return None
+    subject = _clean_subject(reply, text)
+    log.debug("llm subject: %r -> %r -> %r", text, reply, subject)
+    return subject
+
+
+def _clean_subject(reply: str, source: str) -> str | None:
+    """Trim the reply, then check it was actually taken from the source.
+
+    The check is the point. An extraction that invents a word has not
+    extracted anything, and the cost of believing one is a filter that
+    silently hides a business nobody objected to -- which would look exactly
+    like a bug in the 2GIS search and be found weeks later, if at all. So
+    every word has to be traceable to the input, on a five-character stem
+    because the sentence is inflected and the answer may not be.
+    """
+    subject = reply.strip().strip('"\u00ab\u00bb\u0027.,:;!?').strip()
+    words = subject.split()
+    if not words or len(words) > 3:
+        return None
+
+    haystack = router.normalise(source)
+    if not all(router.normalise(word)[:5] in haystack for word in words
+               if len(word) >= 3):
+        return None
+    return subject

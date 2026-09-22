@@ -218,6 +218,20 @@ def place_shape(transcript: str) -> str:
     return PLACE_NEAREST
 
 
+# "Не предлагай мне аптеку Экона." Detecting that this is a dislike is a
+# keyword test and stays here; pulling the name out of it is not, and lives in
+# llm_intent.extract_subject.
+_DISLIKE = re.compile(r"\bне люблю\b|\bтерпеть не могу\b|\bненавижу\b"
+                      r"|\bне предлагай\b|\bне советуй\b|\bне нравится\b"
+                      r"|\bне хочу (больше|ходить|туда)\b|\bпротивн\w*\b"
+                      r"|\bникогда больше\b|\bбольше не\b")
+
+
+def is_dislike(transcript: str) -> bool:
+    """Is this fact a preference against something?"""
+    return bool(_DISLIKE.search(normalise(transcript)))
+
+
 # --- which playback command was given ---------------------------------------
 # Same division of labour as place_shape: regexes decide, the model phrases.
 # There is nothing here a model would do better -- "поставь на паузу" is not

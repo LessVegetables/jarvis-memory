@@ -68,7 +68,8 @@ def get_schedule(user_id: str, day: date) -> list[tuple[str, str]]:
             for row in rows]
 
 
-def get_facts(user_id: str, transcript: str, limit: int = 3) -> list[str]:
+def get_facts(user_id: str, transcript: str, limit: int = 3,
+              skip_acted_on: bool = False) -> list[str]:
     """Facts about the user that are relevant to their question.
 
     Searches by meaning: the question is embedded and compared against the
@@ -83,16 +84,35 @@ def get_facts(user_id: str, transcript: str, limit: int = 3) -> list[str]:
     Falls back to the most recent facts when semantic search is unavailable
     (no model file, no sqlite-vec). The assistant still answers; it just
     stops being clever about which facts it mentions.
+
+    `skip_acted_on` drops preferences that the code has already applied.
+    "Я терпеть не могу аптеку Экона" is honoured by places.py filtering Экона
+    out of the results -- and if the sentence is then quoted into the same
+    prompt, the name is right back in front of the model, which is the one
+    place it must not be. The preference has been kept, so saying it again
+    only creates a chance to mention what was just removed.
     """
     found = _search_facts(user_id, transcript, limit)
-    if found is not None:
-        return found
+    if found is None:
+        rows = db.connect().execute(
+            "SELECT text FROM facts WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+            (user_id, limit),
+        ).fetchall()
+        found = [row["text"] for row in rows]
 
-    rows = db.connect().execute(
-        "SELECT text FROM facts WHERE user_id = ? ORDER BY id DESC LIMIT ?",
-        (user_id, limit),
-    ).fetchall()
-    return [row["text"] for row in rows]
+    if skip_acted_on:
+        acted_on = _acted_on(user_id)
+        found = [text for text in found if text not in acted_on]
+    return found
+
+
+def _acted_on(user_id: str) -> set[str]:
+    """Facts whose meaning is already enforced by code, not by the prompt."""
+    return {row["text"] for row in db.connect().execute(
+        "SELECT text FROM facts "
+        "WHERE user_id = ? AND polarity = ? AND subject IS NOT NULL",
+        (user_id, NEGATIVE),
+    )}
 
 
 def _search_facts(user_id: str, transcript: str, limit: int) -> list[str] | None:
@@ -124,7 +144,26 @@ def _describe(row) -> str:
     return f"{row['title']}, {row['location']}" if row["location"] else row["title"]
 
 
-def add_fact(user_id: str, text: str) -> int:
+NEGATIVE = "negative"
+
+
+def get_dislikes(user_id: str) -> tuple[str, ...]:
+    """Things this person has asked not to be offered.
+
+    Read on every places question, so it is a plain indexed lookup and not a
+    vector search: "do not offer me this" has to hold whatever they happen to
+    ask next, not only questions that resemble the sentence they said it in.
+    """
+    rows = db.connect().execute(
+        "SELECT subject FROM facts "
+        "WHERE user_id = ? AND polarity = ? AND subject IS NOT NULL",
+        (user_id, NEGATIVE),
+    ).fetchall()
+    return tuple(row["subject"] for row in rows if row["subject"])
+
+
+def add_fact(user_id: str, text: str, polarity: str | None = None,
+             subject: str | None = None) -> int:
     """Store a new fact about the user. Returns its row id.
 
     This is the only write path into long-term memory, and it exists so the
@@ -153,7 +192,8 @@ def add_fact(user_id: str, text: str) -> int:
     # Rolls back on failure so a half-done write never holds the lock.
     with conn:
         cursor = conn.execute(
-            "INSERT INTO facts (user_id, text) VALUES (?, ?)", (user_id, text)
+            "INSERT INTO facts (user_id, text, polarity, subject) "
+            "VALUES (?, ?, ?, ?)", (user_id, text, polarity, subject)
         )
         fact_id = cursor.lastrowid
         _index_facts([(fact_id, user_id, text)])

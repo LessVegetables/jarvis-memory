@@ -51,6 +51,11 @@ REPEAT_EMPTY = "Тебя просят повторить, но ты пока н�
 # "Запомни, что..." -- the fact is already saved by the time the model sees
 # this. Its only job is to confirm out loud.
 REMEMBER_BLOCK = 'Ты только что запомнил: "{fact}". Коротко подтверди это.'
+# A dislike is worth confirming differently: what changed is not that
+# something was written down, it is that the assistant will now behave
+# differently, and saying so is how the person finds out it worked.
+REMEMBER_DISLIKE_BLOCK = ('Ты запомнил, что «{subject}» предлагать не нужно. '
+                          'Коротко подтверди, что больше не будешь.')
 
 # --- live data: weather (weatherapi.com) and places (2GIS) ------------------
 # Every failure mode has its own sentence, so the model says what actually

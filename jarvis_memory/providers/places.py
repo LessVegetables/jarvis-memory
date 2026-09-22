@@ -346,11 +346,20 @@ def _address(name: str) -> str:
 def _disliked(name: str, dislikes: tuple[str, ...]) -> bool:
     """Has the speaker asked not to be offered this one?
 
-    Substring match through `normalise`, because what gets stored is what was
-    said out loud -- "экона" against "Аптека Экона".
+    Five-character stems rather than a plain substring, for the same reason
+    spotify.py matches playlists that way: what was stored came out of a
+    spoken sentence and is inflected, while 2GIS's name is not. Someone says
+    "не предлагай мне аптеку Экона", what gets kept may be "аптеку Экона",
+    and the business is called "Аптека Экона" -- no substring of one is a
+    substring of the other.
     """
     haystack = router.normalise(name)
-    return any(d and router.normalise(d) in haystack for d in dislikes)
+    for dislike in dislikes:
+        stems = [word[:5] for word in router.normalise(dislike or "").split()
+                 if len(word) >= 3]
+        if stems and all(stem in haystack for stem in stems):
+            return True
+    return False
 
 
 # --- opening hours ------------------------------------------------------------

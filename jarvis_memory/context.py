@@ -115,7 +115,11 @@ def build_context(user_id: str | None, transcript: str,
         # onto it is what makes the next turn's "а это далеко?" answerable
         # about that business rather than about a fresh search's first hit.
         found = places.answer(
-            transcript, now, last_place=history.get_last_place(user_id, now=now))
+            transcript, now,
+            last_place=history.get_last_place(user_id, now=now),
+            # Applied before anything is selected, so a place someone asked
+            # not to be offered cannot come back as "the nearest" either.
+            dislikes=store.get_dislikes(user_id) if user_id else ())
         blocks.append(found.text)
         if found.place is not None:
             history.set_last_place(user_id, found.place, now=now)
@@ -203,7 +207,19 @@ def _blocks_for(user_id: str, transcript: str,
     # so it is searchable immediately, before the model confirms it out loud.
     if intent == router.REMEMBER:
         fact = router.extract_fact(transcript)
-        store.add_fact(user_id, fact)
+
+        # A preference against something is stored twice over: as text, which
+        # is what RAG recites, and as a subject, which is what places.py
+        # filters on. Reciting a preference is not the same as honouring one,
+        # and only the second column makes the assistant act on it.
+        polarity = subject = None
+        if router.is_dislike(transcript):
+            polarity = store.NEGATIVE
+            subject = llm_intent.extract_subject(fact)
+
+        store.add_fact(user_id, fact, polarity=polarity, subject=subject)
+        if subject:
+            return [prompts.REMEMBER_DISLIKE_BLOCK.format(subject=subject)]
         return [prompts.REMEMBER_BLOCK.format(fact=fact)]
 
     if intent == router.SCHEDULE:
@@ -220,7 +236,11 @@ def _blocks_for(user_id: str, transcript: str,
     # Facts help where the answer depends on someone's preferences,
     # and are dead weight in a question about the weather.
     if intent in (router.PLACES, router.GENERAL):
-        facts = store.get_facts(user_id, transcript)
+        # On a places question, a dislike that has already been applied as a
+        # filter is left out: quoting it would put the very name that was
+        # just removed from the results back into the prompt.
+        facts = store.get_facts(user_id, transcript,
+                                skip_acted_on=(intent == router.PLACES))
         if facts:
             lines = "\n".join(f"- {fact}" for fact in facts)
             blocks.append(prompts.FACTS_BLOCK.format(lines=lines))

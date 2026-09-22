@@ -38,10 +38,18 @@ CREATE INDEX IF NOT EXISTS events_by_source ON events(user_id, source, starts_at
 -- One fact per row, one short sentence each. Deliberately not a "profile
 -- blob": step 5 retrieves these individually by meaning, and a paragraph
 -- cannot be retrieved in pieces.
+-- `polarity` and `subject` are what turn a remembered fact into a behaviour.
+-- "Я терпеть не могу аптеку Экона" is already searchable as text, and RAG
+-- will happily recite it back -- but reciting a preference is not honouring
+-- one. To stop offering the place, the code needs the thing itself ("Экона"),
+-- separate from the sentence it arrived in. Both stay NULL for ordinary
+-- facts, which is all of them until someone says otherwise.
 CREATE TABLE IF NOT EXISTS facts (
     id         INTEGER PRIMARY KEY,
     user_id    TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     text       TEXT NOT NULL,
+    polarity   TEXT,
+    subject    TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

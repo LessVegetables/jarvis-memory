@@ -67,6 +67,10 @@ _ADDED_COLUMNS = {
         "ends_at": "TEXT",
         "all_day": "INTEGER NOT NULL DEFAULT 0",
     },
+    "facts": {
+        "polarity": "TEXT",
+        "subject": "TEXT",
+    },
 }
 
 
