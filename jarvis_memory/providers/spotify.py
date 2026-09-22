@@ -47,6 +47,7 @@ network instead of unlocking their phone.
 from __future__ import annotations
 
 import base64
+import difflib
 import json
 import logging
 import re
@@ -328,7 +329,58 @@ def _own_playlist(wanted: str) -> tuple[str, dict] | None:
     for playlist in items:
         if _name_matches(wanted, router.normalise(playlist.get("name") or "")):
             return playlist["name"], {"context_uri": playlist["uri"]}
-    return None
+
+    # Nothing matched on stems, which for a Russian-speaking owner of
+    # English-named playlists is the normal case rather than the exception.
+    return _sounds_like(wanted, items)
+
+
+# Russian spelled the way an English name sounds. Not a transliteration
+# standard -- the input is someone saying "Night driving" in a Russian
+# sentence, and what has to come out is close enough for a fuzzy match, not
+# correct by GOST.
+_TRANSLIT = {
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ж": "zh",
+    "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m", "н": "n",
+    "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u", "ф": "f",
+    "х": "h", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "sch", "ъ": "",
+    "ы": "y", "ь": "", "э": "e", "ю": "yu", "я": "ya",
+}
+
+# Measured against a real library of English-named playlists: correct matches
+# scored 0.67 and up, the best wrong one 0.38. Anywhere in that gap works;
+# this sits near the bottom of it so a mangled transcript still lands.
+SOUNDS_LIKE_CUTOFF = 0.6
+
+
+def _transliterate(text: str) -> str:
+    return "".join(_TRANSLIT.get(char, char) for char in text)
+
+
+def _sounds_like(wanted: str, items: list[dict]) -> tuple[str, dict] | None:
+    """The playlist whose name the request sounds most like.
+
+    "Найт драйвинг" and "Night driving" share not one character, and STT will
+    produce either depending on how the sentence around it went. Stems cannot
+    bridge that; comparing the sound can.
+
+    Whole name and single words both count, so "баскетбол" finds "Basketball
+    Mix" without the request having to include "Mix".
+    """
+    spoken = _transliterate(wanted)
+    best, best_score = None, 0.0
+    for playlist in items:
+        name = (playlist.get("name") or "").lower()
+        if not name:
+            continue
+        score = max([difflib.SequenceMatcher(None, spoken, name).ratio()]
+                    + [difflib.SequenceMatcher(None, spoken, word).ratio()
+                       for word in name.split()])
+        if score > best_score:
+            best, best_score = playlist, score
+    if best is None or best_score < SOUNDS_LIKE_CUTOFF:
+        return None
+    return best["name"], {"context_uri": best["uri"]}
 
 
 # Possessives and the word "playlist" itself: never part of the name, always
@@ -388,9 +440,9 @@ def _access_token() -> str:
     return _token[0]
 
 
-def _api(method: str, path: str, body: dict | None = None,
-         params: dict | None = None) -> dict:
-    """One Web API call. Returns {} for the empty 204s the player endpoints give."""
+def _request(method: str, path: str, body: dict | None = None,
+             params: dict | None = None) -> tuple[int, bytes]:
+    """Make the call. Returns (status, raw body) and interprets neither."""
     url = f"{API}{path}"
     if params:
         url = f"{url}?{urllib.parse.urlencode(params)}"
@@ -400,24 +452,39 @@ def _api(method: str, path: str, body: dict | None = None,
         "Content-Type": "application/json",
     })
     with urllib.request.urlopen(request, timeout=config.http_timeout()) as response:
-        status, raw = response.status, response.read()
+        return response.status, response.read()
 
-    # The player commands answer 204 with no body -- and sometimes with a
-    # body of one newline, which is why this tests the stripped bytes and not
-    # merely truthiness. Getting that wrong made pause and next report
-    # failure for commands Spotify had already carried out, which is worse
-    # than failing: the music stopped and the assistant said it could not
-    # stop it.
+
+def _api(method: str, path: str, body: dict | None = None,
+         params: dict | None = None) -> dict:
+    """A call whose JSON we actually need. Returns {} when there is none."""
+    status, raw = _request(method, path, body, params)
     if status == 204 or not raw.strip():
         return {}
-    return json.loads(raw.decode("utf-8"))
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        # Every caller copes with an empty dict; none of them cope with an
+        # exception. The bytes are logged rather than guessed at: the last
+        # time this fired the body was neither empty, nor whitespace, nor
+        # JSON, and nothing short of seeing it will say what it was.
+        log.warning("spotify: %s %s returned %s, unparseable body %r",
+                    method, path, status, raw[:120])
+        return {}
 
 
 def _command(method: str, path: str, body: dict | None = None,
              params: dict | None = None) -> None:
-    """A player command, with 404 read as what it actually means."""
+    """A player command, with 404 read as what it actually means.
+
+    Deliberately _request and not _api: pause, next and previous answer with
+    a body this code has no use for, and parsing one it never reads is how
+    "следующий трек" came to report failure for a skip Spotify had already
+    performed. Whatever those bytes are -- a 204, an empty line, a byte order
+    mark -- a command that did not raise, worked.
+    """
     try:
-        _api(method, path, body, params)
+        _request(method, path, body, params)
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             raise NoActiveDevice from exc

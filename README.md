@@ -307,7 +307,12 @@ public last:
    possessives are stripped: «мой любимый плейлист», «моё любимое», «поставь
    мою музыку». This is what "my favourites" means to most people, and it is
    not a playlist — it has no context URI, so its track URIs are sent instead.
-2. **Their own playlists**, matched by name on five-character stems.
+2. **Their own playlists**, matched by name on five-character stems, and
+   then on how the name *sounds*. A Russian speaker's playlists are often
+   named in English: «найт драйвинг» and "Night driving" share not one
+   character, so the request is transliterated and compared with difflib.
+   Measured against a real library, correct matches scored 0.67 and up and
+   the best wrong one 0.38, so the cutoff sits at 0.6.
 3. **An artist**, on an exact name match — «включи ЛСП» wants the act, not
    whichever of their songs ranks first.
 4. **A track, album or playlist** from `/v1/search`.

@@ -33,6 +33,7 @@ NOW = datetime(2026, 9, 14, 14, 30)
 # setup() below swaps _api out for a fake and never puts it back, so the one
 # test that exercises the real response parsing has to restore this.
 _REAL_API = spotify._api
+_REAL_REQUEST = spotify._request
 
 # Shaped like a real answer to "ЛСП": the artist is there, and so are tracks
 # by them. Which one is right depends entirely on what was asked.
@@ -61,6 +62,7 @@ SEARCH = {
 # case that used to fall through to the public catalogue.
 OWN_PLAYLISTS = {"items": [
     {"name": "Night driving", "uri": "spotify:playlist:night"},
+    {"name": "Basketball Mix", "uri": "spotify:playlist:ball"},
     {"name": "Для бега", "uri": "spotify:playlist:run"},
 ]}
 LIKED = {"items": [
@@ -70,7 +72,13 @@ LIKED = {"items": [
 
 
 class FakeApi:
-    """Stands in for the Web API. Records (method, path, body)."""
+    """Stands in for the Web API. Records (method, path, body-or-params).
+
+    Two entry points, because the module has two: _api for calls whose JSON
+    matters, and _request for player commands, which do not read the body at
+    all. A fake that only covered _api let the command path reach the real
+    network.
+    """
 
     def __init__(self, playlists=OWN_PLAYLISTS, search=SEARCH, error_on=None,
                  liked=LIKED, volume=40, playing=None):
@@ -99,6 +107,11 @@ class FakeApi:
             return self.playing
         return {}
 
+    def request(self, method, path, body=None, params=None):
+        """_request: records the call and returns an empty 204, as Spotify does."""
+        self(method, path, body, params)
+        return 204, b""
+
     def played(self):
         """Only the calls that CHANGE something.
 
@@ -120,6 +133,7 @@ def setup(api=None, credentials=True):
             os.environ.pop(name, None)
     fake = api or FakeApi()
     spotify._api = fake
+    spotify._request = fake.request
     spotify._command.__globals__["_api"] = fake
     db.close()
     seed.seed()
@@ -194,6 +208,29 @@ def test_pause_next_previous():
         api = setup()
         spotify.block(phrase, NOW)
         assert api.played() == [expected], (phrase, api.calls)
+
+
+def test_an_english_playlist_named_in_russian():
+    """The normal case for a Russian speaker with an English library.
+
+    "Найт драйвинг" and "Night driving" share not one character, so stems
+    cannot bridge it and the request used to fall through to the public
+    catalogue.
+    """
+    for phrase, uri in (("включи найт драйвинг", "spotify:playlist:night"),
+                        ("поставь баскетбол", "spotify:playlist:ball"),
+                        ("включи night driving", "spotify:playlist:night")):
+        api = setup()
+        spotify.block(phrase, NOW)
+        assert ("PUT", "/me/player/play", {"context_uri": uri}) in api.calls, phrase
+        assert not any(p == "/search" for _, p, _ in api.calls), phrase
+
+
+def test_sounding_like_nothing_still_reaches_the_catalogue():
+    """The cutoff has to let genuinely unknown things through."""
+    api = setup()
+    spotify.block("включи This is America", NOW)
+    assert any(p == "/search" for _, p, _ in api.calls), api.calls
 
 
 def test_an_artist_is_played_as_an_artist():
@@ -310,6 +347,9 @@ def test_any_other_failure_is_admitted():
     class Boom:
         def __call__(self, *a, **kw):
             raise RuntimeError("spotify is on fire")
+
+        def request(self, *a, **kw):
+            raise RuntimeError("spotify is on fire")
     setup(Boom())
     assert spotify.block("включи музыку", NOW) == prompts.MUSIC_UNAVAILABLE
 
@@ -348,7 +388,7 @@ def test_empty_responses_are_success_not_a_parse_error():
     stopped and the assistant said it could not stop it.
     """
     import urllib.request
-    spotify._api = _REAL_API
+    spotify._api, spotify._request = _REAL_API, _REAL_REQUEST
     spotify._token = ("tok", datetime(2099, 1, 1))
     original = urllib.request.urlopen
     try:
@@ -388,6 +428,8 @@ TESTS = [
     test_bare_my_music_also_means_liked_songs,
     test_empty_library_falls_back_to_a_playlist,
     test_a_named_playlist_still_wins_over_the_catalogue,
+    test_an_english_playlist_named_in_russian,
+    test_sounding_like_nothing_still_reaches_the_catalogue,
     test_an_artist_is_played_as_an_artist,
     test_a_famous_song_beats_an_obscure_band_of_the_same_name,
     test_a_famous_band_beats_an_obscure_song_of_the_same_name,
