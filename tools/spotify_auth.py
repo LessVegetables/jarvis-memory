@@ -49,6 +49,8 @@ SCOPES = " ".join([
     "user-modify-playback-state",
     "user-read-playback-state",
     "playlist-read-private",
+    # Liked Songs, which is what "включи мой любимый плейлист" resolves to.
+    "user-library-read",
 ])
 
 _result: dict[str, str] = {}

@@ -13,11 +13,20 @@ audio module or the LLM module has to know that music exists.
 
 --- what it plays ------------------------------------------------------------
 
-The speaker's own playlists are searched before the public catalogue. "Включи
-мой любимый плейлист" is the request this project exists to demonstrate, and
-/v1/search would answer it with a stranger's playlist that happens to be
-called that. A personal assistant that plays someone else's music is not the
-demo.
+Three places are looked in, in this order, and the public catalogue is last:
+
+  1. Liked Songs, for "включи мой любимый плейлист" and anything else that
+     names no particular thing. This is what "my favourites" means to most
+     people, and it is not a playlist at all -- it does not appear in
+     /me/playlists and has no context URI, so it is played by fetching the
+     track URIs and handing those over.
+  2. The speaker's own playlists, matched by name.
+  3. /v1/search.
+
+The order is the feature. Asked for "мой любимый плейлист" against a library
+whose playlists are all named in English, a name match finds nothing and
+/v1/search will cheerfully answer with a stranger's track called that. A
+personal assistant that plays someone else's music is not the demo.
 
 --- auth ---------------------------------------------------------------------
 
@@ -74,6 +83,11 @@ def block(transcript: str, now: datetime) -> str:
         # open Spotify on a phone.
         log.info("spotify: no active device")
         return prompts.MUSIC_NO_DEVICE
+    except urllib.error.HTTPError as exc:
+        # A status line says more than a traceback here, and says it in one
+        # line: every frame in it is urllib's, not ours.
+        log.warning("spotify: HTTP %s on %s", exc.code, exc.url)
+        return prompts.MUSIC_UNAVAILABLE
     except Exception:                                          # noqa: BLE001
         log.exception("spotify block failed")
         return prompts.MUSIC_UNAVAILABLE
@@ -113,12 +127,54 @@ def _block(transcript: str, now: datetime) -> str:
 
 def _find(query: str) -> tuple[str, dict] | None:
     """(spoken name, play-request body) for the best match, or None."""
-    own = _own_playlist(query)
+    wanted = _strip_possessive(router.normalise(query))
+
+    # "Мой любимый плейлист", "моё любимое", "включи мою музыку" -- nothing
+    # distinguishing left after the possessives, so it is the saved library
+    # and not any particular playlist.
+    if _FAVOURITES.fullmatch(wanted or ""):
+        liked = _liked_songs()
+        if liked is not None:
+            return liked
+        # An empty library is not an error, just nothing to play from. Fall
+        # through with an empty name: "любимый" was never a playlist title,
+        # it was a way of saying "mine", so matching it against names would
+        # find nothing and send a request for the speaker's own music off to
+        # the public catalogue.
+        wanted = ""
+
+    own = _own_playlist(wanted)
     if own is not None:
         return own
+    return _search(query)
 
+
+# What is left of "мой любимый плейлист" after the possessives go. Empty
+# counts: "включи мою музыку" names nothing in particular either.
+_FAVOURITES = re.compile(r"(любим\w*|избранн\w*|музык\w*|треки|песни|\s)*")
+
+# Enough to fill a listening session. Liked Songs has no context URI, so the
+# tracks go over as an explicit list and the player does not continue past
+# them -- 50 is the API's page size and about three hours of music.
+LIKED_LIMIT = 50
+
+
+def _liked_songs() -> tuple[str, dict] | None:
+    """The speaker's saved tracks, newest first, or None if there are none."""
+    items = (_api("GET", "/me/tracks",
+                  params={"limit": LIKED_LIMIT}).get("items")) or []
+    uris = [i["track"]["uri"] for i in items
+            if (i.get("track") or {}).get("uri")]
+    if not uris:
+        return None
+    return "Любимые треки", {"uris": uris}
+
+
+def _search(query: str) -> tuple[str, dict] | None:
+    """The public catalogue. Last resort, and the only one that can return
+    something the speaker has never heard of."""
     results = _api("GET", "/search", params={
-        "q": query, "type": "track,playlist", "limit": 5, "market": "from_token",
+        "q": query, "type": "track,playlist", "limit": 5,
     })
 
     tracks = ((results.get("tracks") or {}).get("items")) or []
@@ -136,21 +192,21 @@ def _find(query: str) -> tuple[str, dict] | None:
     return None
 
 
-def _own_playlist(query: str) -> tuple[str, dict] | None:
+def _own_playlist(wanted: str) -> tuple[str, dict] | None:
     """The speaker's own playlist whose name best matches, if any.
 
-    Checked before /v1/search so that "мой любимый плейлист" plays theirs and
-    not a stranger's with the same title.
+    `wanted` has already been through _strip_possessive. Checked before
+    /v1/search so a named playlist of theirs wins over a stranger's.
     """
     items = (_api("GET", "/me/playlists", params={"limit": 50}).get("items")) or []
     if not items:
         return None
 
-    wanted = _strip_possessive(router.normalise(query))
     if not wanted:
-        # "Мой плейлист", with nothing to tell one from another. Spotify
-        # returns them in the order the owner keeps them, so the first is the
-        # closest thing to "mine" that the request actually specified.
+        # "Мой плейлист", with nothing to tell one from another, and no saved
+        # tracks to fall back on. Spotify returns them in the order the owner
+        # keeps them, so the first is the closest thing to "mine" that the
+        # request actually specified.
         first = items[0]
         return first["name"], {"context_uri": first["uri"]}
 

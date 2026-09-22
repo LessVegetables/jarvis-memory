@@ -38,17 +38,26 @@ SEARCH = {
     "playlists": {"items": [{"name": "Чужой плейлист",
                              "uri": "spotify:playlist:stranger"}]},
 }
+# Deliberately named in English, like a real library: a Russian request for
+# "мой любимый плейлист" matches none of them by name, which is exactly the
+# case that used to fall through to the public catalogue.
 OWN_PLAYLISTS = {"items": [
-    {"name": "Любимое", "uri": "spotify:playlist:mine"},
+    {"name": "Night driving", "uri": "spotify:playlist:night"},
     {"name": "Для бега", "uri": "spotify:playlist:run"},
+]}
+LIKED = {"items": [
+    {"track": {"name": "Группа крови", "uri": "spotify:track:liked1"}},
+    {"track": {"name": "Пачка сигарет", "uri": "spotify:track:liked2"}},
 ]}
 
 
 class FakeApi:
     """Stands in for the Web API. Records (method, path, body)."""
 
-    def __init__(self, playlists=OWN_PLAYLISTS, search=SEARCH, error_on=None):
+    def __init__(self, playlists=OWN_PLAYLISTS, search=SEARCH, error_on=None,
+                 liked=LIKED):
         self.playlists, self.search, self.error_on = playlists, search, error_on
+        self.liked = liked
         self.calls = []
 
     def __call__(self, method, path, body=None, params=None):
@@ -57,6 +66,8 @@ class FakeApi:
             raise urllib.error.HTTPError(path, 404, "Not Found", {}, None)
         if path == "/me/playlists":
             return self.playlists
+        if path == "/me/tracks":
+            return self.liked
         if path == "/search":
             return self.search
         return {}
@@ -93,23 +104,44 @@ def test_named_track_is_played_and_confirmed():
     assert "подтверди" in text, text
 
 
-def test_own_playlist_beats_a_stranger_with_the_same_name():
-    """The whole point of a personal assistant playing music."""
+def test_my_favourites_means_liked_songs():
+    """"Мой любимый плейлист" is not a playlist -- it is the saved library.
+
+    The failure this replaces: a library whose playlists are all named in
+    English matches nothing, and the request falls through to /v1/search,
+    which answers with a stranger's track called "мой любимый плейлист".
+    """
     api = setup()
     text = spotify.block("включи мой любимый плейлист", NOW)
     assert ("PUT", "/me/player/play",
-            {"context_uri": "spotify:playlist:mine"}) in api.calls
-    assert "Любимое" in text, text
-    assert "Чужой" not in text, text
-    # It must not have fallen through to the public catalogue at all.
+            {"uris": ["spotify:track:liked1", "spotify:track:liked2"]}) in api.calls
+    assert "Любимые треки" in text, text
+    # It must not have reached the public catalogue at all.
     assert not any(path == "/search" for _, path, _ in api.calls), api.calls
 
 
-def test_named_own_playlist_is_matched_by_the_distinguishing_words():
+def test_bare_my_music_also_means_liked_songs():
     api = setup()
-    spotify.block("включи мой плейлист для бега", NOW)
+    spotify.block("поставь мою музыку", NOW)
+    assert ("PUT", "/me/player/play",
+            {"uris": ["spotify:track:liked1", "spotify:track:liked2"]}) in api.calls
+
+
+def test_empty_library_falls_back_to_a_playlist():
+    """An empty Liked Songs is not an error, just nothing to play from."""
+    api = setup(FakeApi(liked={"items": []}))
+    spotify.block("включи мой любимый плейлист", NOW)
+    assert ("PUT", "/me/player/play",
+            {"context_uri": "spotify:playlist:night"}) in api.calls
+
+
+def test_a_named_playlist_still_wins_over_the_catalogue():
+    api = setup()
+    text = spotify.block("включи мой плейлист для бега", NOW)
     assert ("PUT", "/me/player/play",
             {"context_uri": "spotify:playlist:run"}) in api.calls
+    assert "Чужой" not in text, text
+    assert not any(path == "/search" for _, path, _ in api.calls), api.calls
 
 
 def test_bare_music_request_resumes_instead_of_searching():
@@ -167,7 +199,7 @@ def test_music_reaches_the_prompt_and_works_for_a_guest():
     setup()
     ctx = memory.build_context(None, "включи мой любимый плейлист", now=NOW)
     assert ctx.intent == router.MUSIC
-    assert "Любимое" in ctx.system_prompt
+    assert "Любимые треки" in ctx.system_prompt
     assert prompts.WHO_GUEST in ctx.system_prompt
 
 
@@ -180,8 +212,10 @@ def test_a_song_about_rain_is_not_a_forecast():
 
 TESTS = [
     test_named_track_is_played_and_confirmed,
-    test_own_playlist_beats_a_stranger_with_the_same_name,
-    test_named_own_playlist_is_matched_by_the_distinguishing_words,
+    test_my_favourites_means_liked_songs,
+    test_bare_my_music_also_means_liked_songs,
+    test_empty_library_falls_back_to_a_playlist,
+    test_a_named_playlist_still_wins_over_the_catalogue,
     test_bare_music_request_resumes_instead_of_searching,
     test_pause_next_previous,
     test_no_active_device_says_to_open_the_app,
