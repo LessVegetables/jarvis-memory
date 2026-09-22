@@ -62,7 +62,7 @@ def setup(subject_reply="Экона"):
 def ask(phrase):
     db.connect().execute("DELETE FROM api_cache")
     db.connect().commit()
-    return memory.build_context("anton", phrase, now=NOW).system_prompt
+    return memory.build_context("daniil", phrase, now=NOW).system_prompt
 
 
 def test_a_dislike_changes_behaviour_not_just_memory():
@@ -91,7 +91,7 @@ def test_it_is_stored_as_a_fact_as_well():
     setup()
     ask("запомни, я терпеть не могу аптеку Экона")
     rows = db.connect().execute(
-        "SELECT text, polarity, subject FROM facts WHERE user_id = 'anton'"
+        "SELECT text, polarity, subject FROM facts WHERE user_id = 'daniil'"
     ).fetchall()
     assert len(rows) == 1, rows
     assert "терпеть не могу" in rows[0]["text"]
@@ -104,7 +104,7 @@ def test_an_ordinary_fact_is_not_a_dislike():
     said = ask("запомни, что я вегетарианец")
     assert "предлагать не нужно" not in said, said
     row = db.connect().execute(
-        "SELECT polarity, subject FROM facts WHERE user_id = 'anton'").fetchone()
+        "SELECT polarity, subject FROM facts WHERE user_id = 'daniil'").fetchone()
     assert row["polarity"] is None and row["subject"] is None
     # And the extraction call was never made for it.
     assert llm_intent._ask.calls == 0
@@ -121,7 +121,7 @@ def test_a_failed_extraction_still_stores_the_fact():
         said = ask("запомни, я терпеть не могу аптеку Экона")
         assert "предлагать не нужно" not in said, reply
         row = db.connect().execute(
-            "SELECT polarity, subject FROM facts WHERE user_id = 'anton'").fetchone()
+            "SELECT polarity, subject FROM facts WHERE user_id = 'daniil'").fetchone()
         assert row["polarity"] == store.NEGATIVE, reply
         assert row["subject"] is None, reply
         # Nothing was filtered on a guess.
@@ -131,11 +131,11 @@ def test_a_failed_extraction_still_stores_the_fact():
 def test_one_persons_dislike_is_not_anothers():
     setup()
     ask("запомни, я терпеть не могу аптеку Экона")
-    assert store.get_dislikes("anton") == ("Экона",)
-    assert store.get_dislikes("masha") == ()
-    masha = memory.build_context("masha", "какая аптека ближе всего",
+    assert store.get_dislikes("daniil") == ("Экона",)
+    assert store.get_dislikes("fedor") == ()
+    fedor = memory.build_context("fedor", "какая аптека ближе всего",
                                  now=NOW).system_prompt
-    assert "Экона" in masha, masha
+    assert "Экона" in fedor, fedor
 
 
 def test_a_guest_is_filtered_by_nobodys_preferences():

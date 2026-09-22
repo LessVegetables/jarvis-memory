@@ -72,35 +72,35 @@ def test_vectors_are_built():
 
 def test_search_finds_the_relevant_fact():
     setup()
-    found = store.get_facts("anton", "а орехи мне можно?", limit=3)
+    found = store.get_facts("daniil", "а орехи мне можно?", limit=3)
     assert any("орех" in f.lower() for f in found), found
 
-    found = store.get_facts("anton", "он с собакой гуляет?", limit=3)
+    found = store.get_facts("daniil", "он с собакой гуляет?", limit=3)
     assert any("Бобик" in f for f in found), found
 
 
 def test_search_is_scoped_to_one_user():
     setup()
-    # Masha's facts mention фортепиано; Anton's never should, whatever
-    # Anton asks. A partition key enforces this inside the index -- filtering
+    # Fedor's facts mention фортепиано; Daniil's never should, whatever
+    # Daniil asks. A partition key enforces this inside the index -- filtering
     # after a global search could return k rows that are all hers.
     for question in ["играет на фортепиано?", "что там с музыкой",
                      "аллергия", "расскажи о себе"]:
-        for fact in store.get_facts("anton", question, limit=5):
+        for fact in store.get_facts("daniil", question, limit=5):
             assert "фортепиано" not in fact.lower(), (question, fact)
 
 
 def test_new_fact_is_searchable_immediately():
     setup()
-    store.add_fact("anton", "терпеть не может громкую музыку по утрам")
-    found = store.get_facts("anton", "громкую музыку любит?", limit=3)
+    store.add_fact("daniil", "терпеть не может громкую музыку по утрам")
+    found = store.get_facts("daniil", "громкую музыку любит?", limit=3)
     assert any("громкую музыку" in f for f in found), found
 
 
 def test_duplicate_fact_is_not_indexed_twice():
     setup()
-    first = store.add_fact("anton", "пьёт чай с молоком")
-    second = store.add_fact("anton", "Пьёт чай с молоком")
+    first = store.add_fact("daniil", "пьёт чай с молоком")
+    second = store.add_fact("daniil", "Пьёт чай с молоком")
     assert first == second
     rows = db.connect().execute(
         "SELECT count(*) FROM vec_facts WHERE fact_id = ?", (first,)
@@ -112,7 +112,7 @@ def test_falls_back_when_model_is_missing():
     setup()
     embeddings.set_backend(None)
     try:
-        found = store.get_facts("anton", "а орехи мне можно?", limit=3)
+        found = store.get_facts("daniil", "а орехи мне можно?", limit=3)
         # No semantic search, but the assistant must still get something.
         assert len(found) == 3, found
     finally:
@@ -123,7 +123,7 @@ def test_falls_back_when_model_is_missing():
 
 def test_exchange_is_archived_with_vector():
     setup()
-    memory.record_answer("anton", "как зовут мою собаку?", "Бобик.", now=NOW)
+    memory.record_answer("daniil", "как зовут мою собаку?", "Бобик.", now=NOW)
     conn = db.connect()
     assert conn.execute("SELECT count(*) FROM dialogue").fetchone()[0] == 1
     assert conn.execute("SELECT count(*) FROM vec_dialogue").fetchone()[0] == 1
@@ -140,11 +140,11 @@ def test_unknown_speaker_is_not_archived():
 
 def test_recall_finds_relevant_past_exchange():
     setup()
-    memory.record_answer("anton", "Бобик заболел, что делать?",
+    memory.record_answer("daniil", "Бобик заболел, что делать?",
                          "Отвези Бобика к ветеринару на Ленина.", now=DAYS_AGO(3))
-    memory.record_answer("anton", "сколько будет два плюс два?",
+    memory.record_answer("daniil", "сколько будет два плюс два?",
                          "Четыре.", now=DAYS_AGO(2))
-    found = store.get_dialogue("anton", "что там с Бобиком?",
+    found = store.get_dialogue("daniil", "что там с Бобиком?",
                                limit=1, before=NOW - history.TTL)
     assert found and "Бобик" in found[0][0], found
 
@@ -153,17 +153,17 @@ def test_recent_turns_are_not_recalled():
     """A turn inside the live buffer is already in the messages; recalling
     it from the archive as well would put it in the prompt twice."""
     setup()
-    memory.record_answer("anton", "Бобик заболел", "К ветеринару.", now=NOW)
-    found = store.get_dialogue("anton", "что с Бобиком?",
+    memory.record_answer("daniil", "Бобик заболел", "К ветеринару.", now=NOW)
+    found = store.get_dialogue("daniil", "что с Бобиком?",
                                limit=2, before=NOW - history.TTL)
     assert found == [], found
 
 
 def test_recall_is_scoped_to_user():
     setup()
-    memory.record_answer("masha", "когда репетиция на фортепиано?",
+    memory.record_answer("fedor", "когда репетиция на фортепиано?",
                          "В среду в шесть.", now=DAYS_AGO(2))
-    found = store.get_dialogue("anton", "фортепиано репетиция",
+    found = store.get_dialogue("daniil", "фортепиано репетиция",
                                limit=5, before=NOW - history.TTL)
     assert found == [], found
 
@@ -174,7 +174,7 @@ def test_archive_is_pruned_to_cap():
     store.MAX_DIALOGUE_ROWS = 5
     try:
         for i in range(8):
-            memory.record_answer("anton", f"вопрос номер {i}", f"ответ {i}",
+            memory.record_answer("daniil", f"вопрос номер {i}", f"ответ {i}",
                                  now=DAYS_AGO(30) + timedelta(minutes=i))
         conn = db.connect()
         rows = conn.execute("SELECT question FROM dialogue ORDER BY id").fetchall()
@@ -190,9 +190,9 @@ def test_archive_is_pruned_to_cap():
 def test_context_includes_past_dialogue_for_general_questions():
     setup()
     memory.clear()
-    memory.record_answer("anton", "Бобик заболел, что делать?",
+    memory.record_answer("daniil", "Бобик заболел, что делать?",
                          "Отвези Бобика к ветеринару.", now=DAYS_AGO(3))
-    ctx = memory.build_context("anton", "что там с Бобиком, как он?", now=NOW)
+    ctx = memory.build_context("daniil", "что там с Бобиком, как он?", now=NOW)
     assert ctx.intent == "general"
     assert prompts.DIALOGUE_BLOCK.split(":")[0] in ctx.system_prompt, ctx.system_prompt
     assert "ветеринару" in ctx.system_prompt
@@ -201,8 +201,8 @@ def test_context_includes_past_dialogue_for_general_questions():
 def test_context_omits_past_dialogue_for_schedule_questions():
     setup()
     memory.clear()
-    memory.record_answer("anton", "Бобик заболел", "К ветеринару.", now=DAYS_AGO(3))
-    ctx = memory.build_context("anton", "что у меня сегодня?", now=NOW)
+    memory.record_answer("daniil", "Бобик заболел", "К ветеринару.", now=DAYS_AGO(3))
+    ctx = memory.build_context("daniil", "что у меня сегодня?", now=NOW)
     assert ctx.intent == "schedule"
     assert "прошлых разговоров" not in ctx.system_prompt
 

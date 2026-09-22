@@ -417,7 +417,7 @@ def test_music_reaches_the_prompt_and_works_for_a_guest():
 
 def test_a_song_about_rain_is_not_a_forecast():
     api = setup()
-    ctx = memory.build_context("anton", "поставь песню про дождь", now=NOW)
+    ctx = memory.build_context("daniil", "поставь песню про дождь", now=NOW)
     assert ctx.intent == router.MUSIC, ctx.intent
     assert "Погода" not in ctx.system_prompt
 

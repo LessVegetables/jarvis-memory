@@ -23,29 +23,35 @@ _TODAY = date.today()
 NOW = datetime.combine(_TODAY - timedelta(days=_TODAY.weekday()), time(14, 30))
 
 CASES = [
-    ("anton", "какое у меня сегодня расписание?"),
-    ("masha", "какое у меня сегодня расписание?"),
+    # The same question, four times. Two invented schedules that differ, one
+    # real one, and a guest who is refused -- that difference is the module.
+    ("daniil", "какое у меня сегодня расписание?"),
+    ("fedor", "какое у меня сегодня расписание?"),
+    # Seeded with no events by design (seed.CALENDAR_ONLY), so this block is
+    # empty until tools/sync_calendars.py has run against a real calendar.
+    # An empty block here means sync has not run, not that the code is broken.
+    ("daniel", "какое у меня сегодня расписание?"),
     (None,    "какое у меня сегодня расписание?"),
-    ("anton", "что приготовить на ужин?"),
+    ("daniil", "что приготовить на ужин?"),
     (None,    "какая сегодня погода?"),
 
     # Places: the same search, five different questions. Each block names one
     # business and carries only the fields that answer what was asked -- the
     # thing to look at here is what is NOT in each prompt.
-    ("anton", "какая аптека ближе всего"),
-    ("anton", "какая аптека сейчас работает"),
-    ("anton", "до скольки работает аптека"),
-    ("anton", "у какой аптеки рейтинг лучше"),
-    ("anton", "какие аптеки рядом"),
+    ("daniil", "какая аптека ближе всего"),
+    ("daniil", "какая аптека сейчас работает"),
+    ("daniil", "до скольки работает аптека"),
+    ("daniil", "у какой аптеки рейтинг лучше"),
+    ("daniil", "какие аптеки рядом"),
 
     # A preference that changes behaviour: after this, Экона stops appearing
     # in the answer above -- and the sentence itself stops appearing too, so
     # the name is not reintroduced into the prompt it was filtered out of.
-    ("anton", "запомни, я терпеть не могу аптеку Экона"),
-    ("anton", "какая аптека ближе всего"),
+    ("daniil", "запомни, я терпеть не могу аптеку Экона"),
+    ("daniil", "какая аптека ближе всего"),
 
     # Music: the command has already run by the time the model sees this.
-    ("anton", "включи мой любимый плейлист"),
+    ("daniil", "включи мой любимый плейлист"),
 ]
 
 
@@ -84,28 +90,28 @@ def main():
     print("# Multi-turn dialogue and sticky follow-up")
     print("#" * 70)
     memory.clear()
-    show("anton", "во сколько у меня лекция?")
+    show("daniil", "во сколько у меня лекция?")
     memory.record_answer(
-        "anton",
+        "daniil",
         "во сколько у меня лекция?",
         "В четыре часа дня, аудитория триста пять.",
         now=NOW,
     )
-    show("anton", "а завтра?")
+    show("daniil", "а завтра?")
 
     # "Повтори": the previous answer is handed back verbatim rather than
     # recomputed, so the model cannot drift into a different answer.
     print("#" * 70)
     print("# Repeat")
     print("#" * 70)
-    show("anton", "повтори, я не расслышал")
+    show("daniil", "повтори, я не расслышал")
 
     # "Запомни, что...": the only path that writes. The fact is in the
     # database by the time the model is asked to confirm it.
     print("#" * 70)
     print("# Writing a new fact by voice")
     print("#" * 70)
-    show("anton", "запомни, что я не ем острое")
+    show("daniil", "запомни, что я не ем острое")
     show(None, "запомни, что я не ем острое")
 
     # Recalling a conversation from days ago. Needs the embedding model:
@@ -116,12 +122,12 @@ def main():
     print("#" * 70)
     memory.clear()
     memory.record_answer(
-        "anton",
+        "daniil",
         "Бобик что-то приболел, что делать?",
         "Свози Бобика к ветеринару на Ленина, он открыт до восьми.",
         now=NOW - timedelta(days=3),
     )
-    show("anton", "как думаешь, Бобику уже лучше?")
+    show("daniil", "как думаешь, Бобику уже лучше?")
 
 
 if __name__ == "__main__":

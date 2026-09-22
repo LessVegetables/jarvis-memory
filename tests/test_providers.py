@@ -356,7 +356,7 @@ def test_guest_gets_weather_but_not_schedule():
 def test_known_user_places_question_keeps_facts():
     setup()
     base.fetch_json = FakeFetch(PLACES_PAYLOAD)
-    ctx = memory.build_context("anton", "какие кафе рядом?", now=NOW)
+    ctx = memory.build_context("daniil", "какие кафе рядом?", now=NOW)
     assert "Поблизости есть" in ctx.system_prompt
     assert "Что важно помнить о собеседнике" in ctx.system_prompt
 

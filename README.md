@@ -136,12 +136,22 @@ would leak one housemate's facts into another's answer.
 
 ## Users
 
-`seed.py` creates two fake demo users, `anton` and `masha`. Real people are
-added with:
+`seed.py` creates the team: `daniel`, `daniil`, `fedor`, `stepan`, `gleb`.
+Each gets ~8 facts, and everyone except `daniel` gets a week of invented
+events — deliberately absurd ones, so a seeded row can never be mistaken for
+a real appointment. `daniel` is in `seed.CALENDAR_ONLY`: he gets no events at
+all, because his schedule comes from his real calendar (see below).
+
+Ages are seeded as `NULL` — the assistant says the number out loud, so it is
+not ours to invent. Set one, or add someone new, with:
 
 ```bash
-python3 tools/add_user.py daniel "Даниил" 21
+python3 tools/add_user.py daniel "Даниэль" 21
 ```
+
+Two of these ids are one letter apart (`daniel`, `daniil`). A mistyped
+`user_id` does not fail anywhere — it silently reads or writes the wrong
+person's memory. Copy the strings rather than retyping them.
 
 The `user_id` must be **exactly the id module B emits** for that voice —
 it is the key everything else hangs off. Nothing creates users implicitly:

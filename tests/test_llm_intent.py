@@ -79,13 +79,13 @@ def test_regex_hits_never_reach_the_model():
     for phrase in ("какая сегодня погода?", "что у меня завтра?",
                    "до скольки работает аптека", "повтори",
                    "запомни, что у меня аллергия на орехи"):
-        memory.build_context("anton", phrase, now=NOW)
+        memory.build_context("daniil", phrase, now=NOW)
     assert ask.calls == 0, ask.prompts
 
 
 def test_model_rescues_a_phrase_the_regexes_miss():
     ask = setup(FakeAsk("место"))
-    ctx = memory.build_context("anton", "мне бы кофе выпить где-нибудь", now=NOW)
+    ctx = memory.build_context("daniil", "мне бы кофе выпить где-нибудь", now=NOW)
     assert ask.calls == 1
     assert ctx.intent == router.PLACES
 
@@ -95,14 +95,14 @@ def test_unreachable_model_falls_back_to_general():
     the intent the caller would have used anyway."""
     for reply in (None, "не могу понять ваш запрос", "погода место", "другое"):
         ask = setup(FakeAsk(reply))
-        ctx = memory.build_context("anton", "мне бы кофе выпить где-нибудь", now=NOW)
+        ctx = memory.build_context("daniil", "мне бы кофе выпить где-нибудь", now=NOW)
         assert ask.calls == 1, reply
         assert ctx.intent == router.GENERAL, (reply, ctx.intent)
 
 
 def test_kill_switch_stops_the_call_entirely():
     ask = setup(FakeAsk("место"), enabled="0")
-    ctx = memory.build_context("anton", "мне бы кофе выпить где-нибудь", now=NOW)
+    ctx = memory.build_context("daniil", "мне бы кофе выпить где-нибудь", now=NOW)
     assert ask.calls == 0
     assert ctx.intent == router.GENERAL
 
@@ -111,9 +111,9 @@ def test_rescued_intent_becomes_the_sticky_one():
     """A rescued turn has to support a follow-up like any other, or "а
     завтра?" after it falls back to GENERAL again."""
     ask = setup(FakeAsk("расписание"))
-    memory.build_context("anton", "чем я буду занят", now=NOW)
+    memory.build_context("daniil", "чем я буду занят", now=NOW)
     assert ask.calls == 1
-    ctx = memory.build_context("anton", "а завтра?", now=NOW)
+    ctx = memory.build_context("daniil", "а завтра?", now=NOW)
     assert ctx.intent == router.SCHEDULE
     assert ask.calls == 1, "the follow-up was already resolved by the router"
 

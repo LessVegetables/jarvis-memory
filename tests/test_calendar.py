@@ -114,7 +114,7 @@ def test_parse_expands_recurrences_and_converts_times():
 
 # --- sync ----------------------------------------------------------------------------
 
-def _seed_count(user_id="anton"):
+def _seed_count(user_id="daniil"):
     return db.connect().execute(
         "SELECT count(*) FROM events WHERE user_id = ? AND source = 'seed'", (user_id,)
     ).fetchone()[0]
@@ -124,15 +124,15 @@ def test_sync_replaces_its_window_and_leaves_seed_alone():
     setup()
     before = _seed_count()
     source = IcsSource("google", "https://x", fetch=lambda url: ics("timed", "allday", "weekly"))
-    results = sync_all(now=NOW, sources={"anton": [source]})
-    assert results == {"anton/ics:google": {"ok": True, "events": 4}}, results
+    results = sync_all(now=NOW, sources={"daniil": [source]})
+    assert results == {"daniil/ics:google": {"ok": True, "events": 4}}, results
     assert _seed_count() == before
 
     # Syncing again with one event gone from the feed: it disappears, and
     # nothing is duplicated.
     source = IcsSource("google", "https://x", fetch=lambda url: ics("allday", "weekly"))
-    results = sync_all(now=NOW, sources={"anton": [source]})
-    assert results["anton/ics:google"]["events"] == 3
+    results = sync_all(now=NOW, sources={"daniil": [source]})
+    assert results["daniil/ics:google"]["events"] == 3
     synced = db.connect().execute(
         "SELECT title FROM events WHERE source = 'ics:google' ORDER BY starts_at"
     ).fetchall()
@@ -144,12 +144,12 @@ def test_sync_replaces_its_window_and_leaves_seed_alone():
 def test_schedule_shows_synced_and_all_day_events():
     setup()
     source = IcsSource("google", "https://x", fetch=lambda url: ics("timed", "allday"))
-    sync_all(now=NOW, sources={"anton": [source]})
+    sync_all(now=NOW, sources={"daniil": [source]})
 
-    rows = store.get_schedule("anton", date(2026, 9, 16))
+    rows = store.get_schedule("daniil", date(2026, 9, 16))
     assert rows[0] == ("весь день", "День рождения мамы"), rows
 
-    rows = store.get_schedule("anton", local(datetime(2026, 9, 15, 10, tzinfo=MSK)).date())
+    rows = store.get_schedule("daniil", local(datetime(2026, 9, 15, 10, tzinfo=MSK)).date())
     assert any(title == "Консультация, ауд. 210" for _, title in rows), rows
 
 
@@ -164,12 +164,12 @@ def test_sync_isolates_failures_and_skips_unknown_users():
 
     ok = IcsSource("g", "https://x", fetch=lambda url: ics("timed"))
     results = sync_all(now=NOW, sources={
-        "anton": [Boom(), ok],
+        "daniil": [Boom(), ok],
         "nobody": [IcsSource("g", "https://x", fetch=lambda url: ics("timed"))],
     })
-    assert results["anton/ics:boom"]["ok"] is False
-    assert "dns failed" in results["anton/ics:boom"]["error"]
-    assert results["anton/ics:g"] == {"ok": True, "events": 1}
+    assert results["daniil/ics:boom"]["ok"] is False
+    assert "dns failed" in results["daniil/ics:boom"]["error"]
+    assert results["daniil/ics:g"] == {"ok": True, "events": 1}
     assert "nobody/ics:g" not in results
 
 
@@ -224,18 +224,18 @@ def test_load_sources_reads_password_from_env():
         # The example file ships with a note at the top level; copying it
         # verbatim must not crash the loader. It did once.
         "_comment": "Copy to calendars.json",
-        "anton": [{"type": "ics", "name": "google", "url": "https://x/basic.ics"}],
-        "masha": [{"type": "caldav", "name": "icloud", "url": "https://caldav.icloud.com/",
+        "daniil": [{"type": "ics", "name": "google", "url": "https://x/basic.ics"}],
+        "fedor": [{"type": "caldav", "name": "icloud", "url": "https://caldav.icloud.com/",
                    "username": "m@icloud.com", "password_env": "TEST_ICLOUD_PW",
                    "calendars": ["Учёба"]}],
     }), encoding="utf-8")
     sources = load_sources(path)
-    assert isinstance(sources["anton"][0], IcsSource)
-    icloud = sources["masha"][0]
+    assert isinstance(sources["daniil"][0], IcsSource)
+    icloud = sources["fedor"][0]
     assert isinstance(icloud, CalDavSource)
     assert icloud.password == "abcd-efgh"
     assert icloud.calendars == {"Учёба"}
-    assert set(sources) == {"anton", "masha"}
+    assert set(sources) == {"daniil", "fedor"}
     assert load_sources(_TMP / "missing.json") == {}
 
 
@@ -252,8 +252,8 @@ def test_migration_adds_columns_to_an_old_database():
             id INTEGER PRIMARY KEY,
             user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
             starts_at TEXT NOT NULL, title TEXT NOT NULL, location TEXT);
-        INSERT INTO users VALUES ('anton', 'Антон', 21);
-        INSERT INTO events (user_id, starts_at, title) VALUES ('anton', '2026-09-14 16:00', 'Старая лекция');
+        INSERT INTO users VALUES ('daniil', 'Даниил', 21);
+        INSERT INTO events (user_id, starts_at, title) VALUES ('daniil', '2026-09-14 16:00', 'Старая лекция');
     """)
     conn.commit()
     conn.close()
@@ -263,7 +263,7 @@ def test_migration_adds_columns_to_an_old_database():
     try:
         columns = {r["name"] for r in db.connect().execute("PRAGMA table_info(events)")}
         assert {"source", "uid", "ends_at", "all_day"} <= columns, columns
-        rows = store.get_schedule("anton", date(2026, 9, 14))
+        rows = store.get_schedule("daniil", date(2026, 9, 14))
         assert rows == [("16:00", "Старая лекция")], rows
         row = db.connect().execute("SELECT source, all_day FROM events").fetchone()
         assert (row["source"], row["all_day"]) == ("seed", 0)

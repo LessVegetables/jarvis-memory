@@ -16,7 +16,7 @@ Two constraints that did not exist in a Telegram bot backed by a cloud model:
 
 2. TTL. A Telegram chat is a continuous private thread: come back a week
    later and the history is still yours and still relevant. A kitchen speaker
-   is not a thread. If Anton asked something at 9am and walks up again at 7pm,
+   is not a thread. If someone asked something at 9am and walks up again at 7pm,
    replaying the morning is wrong -- that is a different conversation.
 """
 

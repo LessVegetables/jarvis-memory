@@ -1,22 +1,26 @@
 {
-  "_comment": "Copy to calendars.json (gitignored). Keys are user_ids from the users table.",
+  "_comment": "Copy to calendars.json (gitignored). Keys are user_ids from the users table -- see jarvis_memory/seed.py USERS. A key that is not in that table is skipped with a warning, so add the person first: python3 tools/add_user.py <id> \"Имя\".",
 
-  "anton": [
-    {
-      "type": "ics",
-      "name": "google",
-      "url": "https://calendar.google.com/calendar/ical/USER%40gmail.com/private-XXXXXXXX/basic.ics"
-    }
-  ],
+  "_comment_daniel": "iCloud needs an app-specific password from appleid.apple.com (the account password will not work with two-factor on). Put it in .env as DANIEL_ICLOUD_APP_PASSWORD -- never inline here. `calendars` restricts sync to those display names; drop it to take every calendar on the account, holidays and shared ones included.",
 
-  "masha": [
+  "daniel": [
     {
       "type": "caldav",
       "name": "icloud",
       "url": "https://caldav.icloud.com/",
-      "username": "masha@icloud.com",
-      "password_env": "MASHA_ICLOUD_APP_PASSWORD",
+      "username": "daniel@icloud.com",
+      "password_env": "DANIEL_ICLOUD_APP_PASSWORD",
       "calendars": ["Учёба", "Личное"]
+    }
+  ],
+
+  "_comment_google": "For Google, use the calendar's 'secret address in iCal format' (Settings -> the calendar -> Integrate calendar). It is a plain HTTPS GET with no OAuth, which is why ICS is the route for Google rather than CalDAV. The URL is a credential: it grants read access to the whole calendar.",
+
+  "_example_gleb": [
+    {
+      "type": "ics",
+      "name": "google",
+      "url": "https://calendar.google.com/calendar/ical/USER%40gmail.com/private-XXXXXXXX/basic.ics"
     }
   ]
 }
