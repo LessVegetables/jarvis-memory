@@ -30,11 +30,19 @@ from jarvis_memory.providers import spotify  # noqa: E402
 
 NOW = datetime(2026, 9, 14, 14, 30)
 
+# Shaped like a real answer to "ЛСП": the artist is there, and so are tracks
+# by them. Which one is right depends entirely on what was asked.
 SEARCH = {
-    "tracks": {"items": [{
-        "name": "Группа крови", "uri": "spotify:track:abc",
-        "artists": [{"name": "Кино"}],
-    }]},
+    "artists": {"items": [
+        {"name": "ЛСП", "uri": "spotify:artist:lsp"},
+        {"name": "Кинотеатр", "uri": "spotify:artist:kinoteatr"},
+    ]},
+    "tracks": {"items": [
+        None,                                    # the API really does pad with these
+        {"name": "Группа крови", "uri": "spotify:track:abc",
+         "artists": [{"name": "Кино"}]},
+    ]},
+    "albums": {"items": [{"name": "Свежая кровь", "uri": "spotify:album:blood"}]},
     "playlists": {"items": [{"name": "Чужой плейлист",
                              "uri": "spotify:playlist:stranger"}]},
 }
@@ -55,13 +63,16 @@ class FakeApi:
     """Stands in for the Web API. Records (method, path, body)."""
 
     def __init__(self, playlists=OWN_PLAYLISTS, search=SEARCH, error_on=None,
-                 liked=LIKED):
+                 liked=LIKED, volume=40, playing=None):
         self.playlists, self.search, self.error_on = playlists, search, error_on
-        self.liked = liked
+        self.liked, self.volume = liked, volume
+        self.playing = {"item": {"name": "Группа крови",
+                                 "artists": [{"name": "Кино"}]}} if playing is None \
+            else playing
         self.calls = []
 
     def __call__(self, method, path, body=None, params=None):
-        self.calls.append((method, path, body))
+        self.calls.append((method, path, body if params is None else params))
         if self.error_on and self.error_on in path:
             raise urllib.error.HTTPError(path, 404, "Not Found", {}, None)
         if path == "/me/playlists":
@@ -70,10 +81,21 @@ class FakeApi:
             return self.liked
         if path == "/search":
             return self.search
+        if path == "/me/player":
+            return {"device": {"volume_percent": self.volume}}
+        if path == "/me/player/currently-playing":
+            return self.playing
         return {}
 
     def played(self):
-        return [(m, p, b) for m, p, b in self.calls if "/player/" in p]
+        """Only the calls that CHANGE something.
+
+        Reads go to /me/player/... too -- currently-playing, the device's
+        volume -- so filtering on the path alone counts a question as a
+        command.
+        """
+        return [(m, p, b) for m, p, b in self.calls
+                if m != "GET" and "/player/" in p]
 
 
 def setup(api=None, credentials=True):
@@ -162,6 +184,83 @@ def test_pause_next_previous():
         assert api.played() == [expected], (phrase, api.calls)
 
 
+def test_an_artist_is_played_as_an_artist():
+    """"Включи ЛСП" is a request for the act, not for one song of theirs.
+
+    Searching tracks only -- which is what this did at first -- answers it
+    with whichever song ranked first and never plays the artist at all.
+    """
+    api = setup()
+    text = spotify.block("включи ЛСП", NOW)
+    assert ("PUT", "/me/player/play",
+            {"context_uri": "spotify:artist:lsp"}) in api.calls
+    assert "ЛСП" in text, text
+
+
+def test_a_song_is_still_played_as_a_song():
+    """No artist is called "Группа крови", so the track has to win."""
+    api = setup()
+    spotify.block("включи Группа крови", NOW)
+    assert ("PUT", "/me/player/play",
+            {"uris": ["spotify:track:abc"]}) in api.calls
+
+
+def test_an_artist_must_match_exactly():
+    """"Кино" is a prefix of "Кинотеатр". A loose match here would replace
+    the song someone asked for with a different act's back catalogue."""
+    api = setup()
+    spotify.block("включи кинотеатр повторного фильма", NOW)
+    played = api.played()[0]
+    assert played[2] != {"context_uri": "spotify:artist:kinoteatr"}, played
+
+
+def test_album_is_used_when_there_is_no_track():
+    api = setup(FakeApi(search={"artists": {"items": []},
+                                "tracks": {"items": []},
+                                "albums": SEARCH["albums"],
+                                "playlists": SEARCH["playlists"]}))
+    text = spotify.block("включи свежая кровь", NOW)
+    assert ("PUT", "/me/player/play",
+            {"context_uri": "spotify:album:blood"}) in api.calls
+    assert "Свежая кровь" in text, text
+
+
+def test_quieter_turns_it_down_rather_than_off():
+    """"Тише" used to route to pause, which silenced the music entirely --
+    the one thing the word cannot mean."""
+    api = setup(FakeApi(volume=40))
+    text = spotify.block("сделай потише", NOW)
+    assert ("PUT", "/me/player/volume", {"volume_percent": 20}) in api.calls
+    assert not any("/pause" in path for _, path, _ in api.calls), api.calls
+    assert text == prompts.MUSIC_QUIETER_BLOCK
+
+
+def test_louder_is_relative_to_where_it_is_and_clamps():
+    for start, expected in ((40, 60), (90, 100), (0, 20)):
+        api = setup(FakeApi(volume=start))
+        spotify.block("погромче", NOW)
+        assert ("PUT", "/me/player/volume",
+                {"volume_percent": expected}) in api.calls, start
+
+
+def test_volume_without_a_device_says_to_open_the_app():
+    api = setup(FakeApi(volume=None))
+    assert spotify.block("погромче", NOW) == prompts.MUSIC_NO_DEVICE
+
+
+def test_what_is_playing():
+    api = setup()
+    text = spotify.block("что сейчас играет", NOW)
+    assert "Группа крови — Кино" in text, text
+    # A question, so nothing should have been commanded.
+    assert not api.played(), api.calls
+
+
+def test_nothing_playing_is_not_a_failure():
+    api = setup(FakeApi(playing={}))
+    assert spotify.block("что сейчас играет", NOW) == prompts.MUSIC_NOTHING_PLAYING
+
+
 # --- the failures -------------------------------------------------------------
 
 def test_no_active_device_says_to_open_the_app():
@@ -216,6 +315,15 @@ TESTS = [
     test_bare_my_music_also_means_liked_songs,
     test_empty_library_falls_back_to_a_playlist,
     test_a_named_playlist_still_wins_over_the_catalogue,
+    test_an_artist_is_played_as_an_artist,
+    test_a_song_is_still_played_as_a_song,
+    test_an_artist_must_match_exactly,
+    test_album_is_used_when_there_is_no_track,
+    test_quieter_turns_it_down_rather_than_off,
+    test_louder_is_relative_to_where_it_is_and_clamps,
+    test_volume_without_a_device_says_to_open_the_app,
+    test_what_is_playing,
+    test_nothing_playing_is_not_a_failure,
     test_bare_music_request_resumes_instead_of_searching,
     test_pause_next_previous,
     test_no_active_device_says_to_open_the_app,

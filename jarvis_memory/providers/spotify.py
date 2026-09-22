@@ -108,6 +108,10 @@ def _block(transcript: str, now: datetime) -> str:
     if action == router.MUSIC_PREVIOUS:
         _command("POST", "/me/player/previous")
         return prompts.MUSIC_PREVIOUS_BLOCK
+    if action == router.MUSIC_WHAT:
+        return _now_playing()
+    if action in (router.MUSIC_LOUDER, router.MUSIC_QUIETER):
+        return _set_volume(action == router.MUSIC_LOUDER)
 
     query = router.music_query(transcript)
     if not query:
@@ -121,6 +125,39 @@ def _block(transcript: str, now: datetime) -> str:
     name, body = found
     _command("PUT", "/me/player/play", body)
     return prompts.MUSIC_PLAYING.format(name=name)
+
+
+# How much one "погромче" moves the dial. Spotify's scale is 0-100 and the
+# response to a voice command has to be audible, or the person says it again.
+VOLUME_STEP = 20
+
+
+def _now_playing() -> str:
+    """What is on right now, or that nothing is."""
+    state = _api("GET", "/me/player/currently-playing")
+    item = state.get("item") or {}
+    if not item.get("name"):
+        return prompts.MUSIC_NOTHING_PLAYING
+    artists = ", ".join(a["name"] for a in item.get("artists") or []
+                        if a.get("name"))
+    name = f"{item['name']} — {artists}" if artists else item["name"]
+    return prompts.MUSIC_NOW_PLAYING.format(name=name)
+
+
+def _set_volume(louder: bool) -> str:
+    """Nudge the volume up or down from wherever it currently is.
+
+    Read first, because "погромче" is relative and there is no endpoint for
+    it -- Spotify only takes an absolute percentage.
+    """
+    state = _api("GET", "/me/player")
+    current = ((state.get("device") or {}).get("volume_percent"))
+    if current is None:
+        raise NoActiveDevice
+    step = VOLUME_STEP if louder else -VOLUME_STEP
+    target = max(0, min(100, int(current) + step))
+    _command("PUT", "/me/player/volume", params={"volume_percent": target})
+    return prompts.MUSIC_LOUDER_BLOCK if louder else prompts.MUSIC_QUIETER_BLOCK
 
 
 # --- finding something to play ------------------------------------------------
@@ -172,24 +209,63 @@ def _liked_songs() -> tuple[str, dict] | None:
 
 def _search(query: str) -> tuple[str, dict] | None:
     """The public catalogue. Last resort, and the only one that can return
-    something the speaker has never heard of."""
+    something the speaker has never owned or heard of.
+
+    Four kinds of thing, because "включи ЛСП" and "включи Группа крови" are
+    the same sentence with different objects: one is an artist and one is a
+    song, and nothing in the phrasing says which. Asking only for tracks --
+    which is what this did at first -- answers "включи ЛСП" with whichever
+    song happened to rank first, and never plays the artist.
+
+    An artist wins only on an exact name match. "ЛСП" is unambiguously the
+    artist; "Группа крови" is a song by a band with another name, and there
+    is no artist called that, so it falls through to the track. Matching
+    artists loosely would be worse than not matching them: "кино" is a prefix
+    of "Кинотеатр", and one fuzzy hit would replace the song someone asked
+    for with a different act's back catalogue.
+
+    Playing an artist or an album URI as a `context_uri` is what gives a
+    listening session rather than one song and then silence.
+    """
     results = _api("GET", "/search", params={
-        "q": query, "type": "track,playlist", "limit": 5,
+        "q": query, "type": "artist,track,album,playlist", "limit": 5,
     })
+    wanted = _plain(query)
 
-    tracks = ((results.get("tracks") or {}).get("items")) or []
-    for track in tracks:
-        if track and track.get("uri"):
-            artists = ", ".join(a["name"] for a in track.get("artists") or []
-                                if a.get("name"))
-            name = f"{track['name']} — {artists}" if artists else track["name"]
-            return name, {"uris": [track["uri"]]}
+    for artist in _items(results, "artists"):
+        if _plain(artist.get("name", "")) == wanted:
+            return artist["name"], {"context_uri": artist["uri"]}
 
-    playlists = ((results.get("playlists") or {}).get("items")) or []
-    for playlist in playlists:
-        if playlist and playlist.get("uri"):
-            return playlist["name"], {"context_uri": playlist["uri"]}
+    for track in _items(results, "tracks"):
+        artists = ", ".join(a["name"] for a in track.get("artists") or []
+                            if a.get("name"))
+        name = f"{track['name']} — {artists}" if artists else track["name"]
+        return name, {"uris": [track["uri"]]}
+
+    for album in _items(results, "albums"):
+        return album["name"], {"context_uri": album["uri"]}
+
+    for playlist in _items(results, "playlists"):
+        return playlist["name"], {"context_uri": playlist["uri"]}
     return None
+
+
+def _items(results: dict, kind: str) -> list[dict]:
+    """Search results of one kind, skipping the nulls Spotify pads with.
+
+    The API really does return null entries inside `items`, and a bare
+    `results["tracks"]["items"][0]["uri"]` dies on them.
+    """
+    found = (results.get(kind) or {}).get("items") or []
+    return [item for item in found if item and item.get("uri")]
+
+
+_PUNCT_NAME = re.compile(r"[^\w\s]")
+
+
+def _plain(text: str) -> str:
+    """Normalised and stripped of punctuation, for comparing names."""
+    return " ".join(_PUNCT_NAME.sub(" ", router.normalise(text)).split())
 
 
 def _own_playlist(wanted: str) -> tuple[str, dict] | None:
@@ -289,10 +365,11 @@ def _api(method: str, path: str, body: dict | None = None,
     return json.loads(raw.decode("utf-8")) if raw else {}
 
 
-def _command(method: str, path: str, body: dict | None = None) -> None:
+def _command(method: str, path: str, body: dict | None = None,
+             params: dict | None = None) -> None:
     """A player command, with 404 read as what it actually means."""
     try:
-        _api(method, path, body)
+        _api(method, path, body, params)
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             raise NoActiveDevice from exc

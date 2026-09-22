@@ -49,6 +49,7 @@ SCOPES = " ".join([
     "user-modify-playback-state",
     "user-read-playback-state",
     "playlist-read-private",
+    "playlist-read-collaborative",
     # Liked Songs, which is what "включи мой любимый плейлист" resolves to.
     "user-library-read",
 ])

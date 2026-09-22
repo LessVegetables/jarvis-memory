@@ -244,7 +244,7 @@ costs ~200 tokens, of which history is ~50. The knobs are in `history.py`:
 | `schedule` | «что у меня завтра?» | that day's events, with the day named |
 | `weather` | «зонт нужен?» | today's/tomorrow's forecast from weatherapi.com |
 | `places` | «до скольки работает аптека» | **one** business from 2GIS, with only the fields that answer the question |
-| `music` | «включи мой любимый плейлист» | starts playback, then asks for confirmation |
+| `music` | «включи ЛСП», «что сейчас играет», «потише» | runs the command, then asks for confirmation |
 | `repeat` | «повтори, я не расслышал» | the previous answer, verbatim |
 | `remember` | «запомни, что я не ем острое» | writes a fact, asks for confirmation |
 | `general` | «что приготовить на ужин?» | facts about the user |
@@ -296,6 +296,29 @@ says they dislike something. Both are extraction, not reasoning: the answer is
 already in the input and the model has to find it, not work it out. Set
 `JARVIS_LLM_INTENT=0` to switch both off — worth knowing during a shared
 demo, since it reverts this module to pure regexes without touching code.
+
+### Music: what "включи X" resolves to
+
+`router.music_action()` picks the command — play, pause, next, previous,
+louder, quieter, what-is-playing — and for a play, four places are looked in,
+public last:
+
+1. **Liked Songs**, for anything that names nothing in particular once the
+   possessives are stripped: «мой любимый плейлист», «моё любимое», «поставь
+   мою музыку». This is what "my favourites" means to most people, and it is
+   not a playlist — it has no context URI, so its track URIs are sent instead.
+2. **Their own playlists**, matched by name on five-character stems.
+3. **An artist**, on an exact name match — «включи ЛСП» wants the act, not
+   whichever of their songs ranks first.
+4. **A track, album or playlist** from `/v1/search`.
+
+The order is the feature. Against a library whose playlists are all named in
+English, a Russian request for «мой любимый плейлист» matches nothing by name
+and `/v1/search` will answer it with a stranger's track called that.
+
+The artist match is exact on purpose: «кино» is a prefix of «Кинотеатр», and
+one fuzzy hit replaces the song someone asked for with a different act's back
+catalogue.
 
 ### Preferences that change behaviour
 

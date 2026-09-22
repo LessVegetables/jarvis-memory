@@ -45,6 +45,8 @@ _PATTERNS: list[tuple[str, str]] = [
     (MUSIC, (r"\bвключ[иь]\b|\bпоставь\b|\bвруб[иа]|\bзапусти\b|\bиграй\b"
              r"|\bсыграй\b|\bмузык|\bпесн[юяи]|\bплейлист|\bтрек\b"
              r"|\bследующ\w+ (песн|трек)|\bпереключи\b"
+             r"|\bчто (сейчас |это )?(играет|звучит)|\bкто (это )?(поет|поёт)"
+             r"|\b(громче|погромче|тише|потише)\b"
              r"|\b(пауза|останови|выключи|стоп)\b")),
     (SCHEDULE, (r"\bраспис|\bпланы\b|\bчто у меня\b|\bво сколько у меня\b"
                 r"|\bкогда у меня\b|\bчем я занят|\bсвободен\b|\bвстреч"
@@ -240,14 +242,29 @@ MUSIC_PLAY = "play"
 MUSIC_PAUSE = "pause"
 MUSIC_NEXT = "next"
 MUSIC_PREVIOUS = "previous"
+MUSIC_LOUDER = "louder"
+MUSIC_QUIETER = "quieter"
+MUSIC_WHAT = "what"
 
 _MUSIC_ACTIONS: list[tuple[str, str]] = [
+    # "Что сейчас играет" first: it names no command, and several of the
+    # patterns below would otherwise claim the words in it.
+    (MUSIC_WHAT, r"что (сейчас |это )?(за )?(играет|звучит|поет|поёт)"
+                 r"|что (это |сейчас )?за (песня|трек|группа|исполнитель)"
+                 r"|кто (это )?(поет|поёт|исполня)|как называется"),
+
     # Before pause, because "переключи" and "следующий" are also commands to
     # a player that is currently running.
     (MUSIC_NEXT, r"\bследующ|\bдальше\b|\bпереключи\b|\bдругую песню"),
     (MUSIC_PREVIOUS, r"\bпредыдущ|\bверни\b|\bназад\b|\bпрошл[ую]\w* песню"),
+
+    # Volume before pause. "Тише" used to land in pause, which silenced the
+    # music instead of turning it down -- the one outcome the word cannot mean.
+    (MUSIC_LOUDER, r"\bгромче\b|\bпогромче\b|\bприбав|\bсделай громче"),
+    (MUSIC_QUIETER, r"\bтише\b|\bпотише\b|\bубав|\bсделай тише"),
+
     (MUSIC_PAUSE, r"\bпауз|\bостанови|\bвыключи\b|\bстоп\b|\bхватит\b"
-                  r"|\bзаткнись\b|\bтише\b"),
+                  r"|\bзаткнись\b"),
 ]
 
 
