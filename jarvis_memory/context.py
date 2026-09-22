@@ -79,7 +79,10 @@ def build_context(user_id: str | None, transcript: str,
                if intent in (router.SCHEDULE, router.REMEMBER)
                else prompts.WHO_GUEST)
     else:
-        who = prompts.WHO_KNOWN.format(name=profile["name"])
+        if profile["age"] is None:
+            who = prompts.WHO_KNOWN.format(name=profile["name"])
+        else:
+            who = prompts.WHO_KNOWN_AGE.format(name=profile["name"], age=profile["age"])
         blocks += _blocks_for(user_id, transcript, intent, now)
 
     system_prompt = prompts.SYSTEM_TEMPLATE.format(

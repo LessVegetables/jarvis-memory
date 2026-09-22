@@ -25,6 +25,7 @@ SYSTEM_TEMPLATE = """\
 # Who is asking. The second variant is used when module B did not
 # recognise the speaker's voice.
 WHO_KNOWN = "С тобой говорит {name}."
+WHO_KNOWN_AGE = "С тобой говорит {name}. Возраст (в годах): {age}."
 WHO_UNKNOWN = (
     "Ты не узнал говорящего по голосу. Личные данные (расписание, заметки) "
     "раскрывать нельзя — попроси подойти ближе и повторить."
