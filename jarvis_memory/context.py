@@ -13,7 +13,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
-from . import history, prompts, router, store
+from . import history, num_to_words, prompts, router, store
 from .providers import places, weather
 
 log = logging.getLogger(__name__)
@@ -30,12 +30,28 @@ class PromptContext:
     debug: dict = field(default_factory=dict)
 
     def to_messages(self) -> list[dict[str, str]]:
-        """The full message list -- what the orchestrator passes to the model."""
-        return [
+        """The full message list -- what the orchestrator passes to the model.
+
+        Every message goes through `num_to_words.spell` on the way out, and
+        that is the module's one hard guarantee: not a single digit reaches
+        the model. Telling a 1.5B model to say numbers as words does not
+        work -- it copies the shape it is shown, so "01:44" in the prompt
+        comes back as "01:44" in the answer and the speaker reads it out as
+        a string of characters. The blocks above are already spelled out by
+        the code that built them; this pass catches what we do not write
+        ourselves: dictated facts, calendar titles, the transcript.
+
+        It is idempotent, so spelled-out text passing through again is a
+        no-op -- a few hundred characters of regex against a two-second
+        inference.
+        """
+        messages = [
             {"role": "system", "content": self.system_prompt},
             *self.history,
             {"role": "user", "content": self.transcript},
         ]
+        return [{"role": m["role"], "content": num_to_words.spell(m["content"])}
+                for m in messages]
 
     def estimate_tokens(self) -> int:
         """Rough budget estimate: Russian text runs about 2.5 chars per token.
@@ -82,14 +98,17 @@ def build_context(user_id: str | None, transcript: str,
         if profile["age"] is None:
             who = prompts.WHO_KNOWN.format(name=profile["name"])
         else:
-            who = prompts.WHO_KNOWN_AGE.format(name=profile["name"], age=profile["age"])
+            who = prompts.WHO_KNOWN_AGE.format(
+                name=profile["name"],
+                age=num_to_words.count(profile["age"], ("год", "года", "лет")),
+            )
         blocks += _blocks_for(user_id, transcript, intent, now)
 
-    system_prompt = prompts.SYSTEM_TEMPLATE.format(
+    system_prompt = num_to_words.spell(prompts.SYSTEM_TEMPLATE.format(
         who=who,
         now=_format_now(now),
         blocks=("\n" + "\n\n".join(blocks)) if blocks else "",
-    )
+    ))
 
     ctx = PromptContext(
         system_prompt=system_prompt,
@@ -203,4 +222,7 @@ def _clip(text: str, limit: int = 160) -> str:
 
 
 def _format_now(now: datetime) -> str:
-    return f"{router.WEEKDAYS[now.weekday()]}, {now.day:02d}.{now.month:02d}, {now:%H:%M}"
+    """'среда, двадцать третье сентября, час сорок четыре минуты'."""
+    return (f"{router.WEEKDAYS[now.weekday()]}, "
+            f"{num_to_words.date_words(now.date())}, "
+            f"{num_to_words.time_words(now.hour, now.minute)}")

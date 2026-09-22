@@ -19,6 +19,7 @@ learns what was said back.
 
 from .context import PromptContext, build_context, record_answer
 from .history import clear, get_last_answer
+from .num_to_words import spell
 
 __all__ = [
     "build_context",
@@ -26,4 +27,5 @@ __all__ = [
     "record_answer",
     "get_last_answer",
     "clear",
+    "spell",
 ]

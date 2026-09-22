@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta
 
-from .. import config, prompts, router
+from .. import config, num_to_words, prompts, router
 from . import base
 
 log = logging.getLogger(__name__)
@@ -75,17 +75,33 @@ def _render(payload: dict, offset: int, label: str) -> str:
         current = payload["current"]
         parts.append(
             f"сейчас {_deg(current['temp_c'])}, {current['condition']['text'].lower()}, "
-            f"ветер {round(float(current['wind_kph']))} км/ч."
+            f"ветер {_wind(current['wind_kph'])}."
         )
     parts.append(
-        f"Днём до {_deg(day['maxtemp_c'])}, ночью до {_deg(day['mintemp_c'])}, "
+        f"Днём {_deg(day['maxtemp_c'])}, ночью {_deg(day['mintemp_c'])}, "
         f"{day['condition']['text'].lower()}, "
-        f"вероятность дождя {int(float(day.get('daily_chance_of_rain', 0)))}%."
+        f"вероятность дождя {_percent(day.get('daily_chance_of_rain', 0))}."
     )
     return " ".join(parts)
 
 
+# Everything the model is handed is already spoken Russian: it is read to a
+# person through a speaker, and a small model repeats the shape it is given.
+# "+14°" in the prompt comes back as "+14°" in the answer, whatever the
+# instructions say, so the digits never get written in the first place.
 def _deg(value) -> str:
-    """'+14°' / '-3°' -- the sign spoken aloud avoids "три градуса" ambiguity."""
+    """'плюс четырнадцать градусов' -- the sign is spoken, because
+    "три градуса" alone does not say which side of zero it is on."""
     rounded = round(float(value))
-    return f"{'+' if rounded > 0 else ''}{rounded}°"
+    words = num_to_words.count(rounded, ("градус", "градуса", "градусов"))
+    return f"плюс {words}" if rounded > 0 else words
+
+
+def _wind(kph) -> str:
+    return num_to_words.count(round(float(kph)),
+                              ("километр", "километра", "километров")) + " в час"
+
+
+def _percent(value) -> str:
+    return num_to_words.count(int(float(value)),
+                              ("процент", "процента", "процентов"))

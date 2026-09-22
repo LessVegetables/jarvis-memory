@@ -20,7 +20,7 @@ import re
 import urllib.error
 from datetime import datetime, timedelta
 
-from .. import config, prompts, router
+from .. import config, num_to_words, prompts, router
 from . import base
 
 log = logging.getLogger(__name__)
@@ -29,6 +29,9 @@ URL = "https://catalog.api.2gis.com/3.0/items"
 TTL = timedelta(hours=24)
 RADIUS_M = 1500
 MAX_RESULTS = 4
+
+_METRES = ("метр", "метра", "метров")
+_KILOMETRES = ("километр", "километра", "километров")
 
 # Words that are part of asking, not part of what is being asked about.
 _ASKING = re.compile(
@@ -130,11 +133,19 @@ def _hours_today(schedule: dict | None, now: datetime) -> str | None:
     spans = (today or {}).get("working_hours") or []
     if not spans:
         return "сегодня закрыто"
-    return "сегодня " + ", ".join(f"{s.get('from', '?')}–{s.get('to', '?')}" for s in spans)
+    hours = [num_to_words.time_range(s["from"], s["to"])
+             for s in spans if s.get("from") and s.get("to")]
+    return "сегодня " + ", ".join(hours) if hours else None
 
 
 def _distance_phrase(lat1: float, lon1: float, lat2: float, lon2: float) -> str:
-    """Haversine distance, phrased the way a person would say it."""
+    """Haversine distance, phrased the way a person would say it out loud.
+
+    Nominative, and no preposition: the block header already says these are
+    distances from the house, so "триста метров" slots into whatever sentence
+    the model builds around it. "в трёхстах метрах" would need the
+    prepositional case for every number, to say exactly the same thing.
+    """
     radius = 6_371_000
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
     dphi = math.radians(lat2 - lat1)
@@ -144,5 +155,7 @@ def _distance_phrase(lat1: float, lon1: float, lat2: float, lon2: float) -> str:
     if metres < 50:
         return "прямо у дома"
     if metres < 950:
-        return f"в {int(round(metres, -1))} м"
-    return f"в {metres / 1000:.1f} км".replace(".0 км", " км")
+        return num_to_words.count(int(round(metres, -1)), _METRES)
+    kilometres, rest = divmod(int(round(metres, -2)), 1000)
+    phrase = num_to_words.count(kilometres, _KILOMETRES)
+    return f"{phrase} {num_to_words.count(rest, _METRES)}" if rest else phrase

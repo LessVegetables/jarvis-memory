@@ -88,18 +88,22 @@ def test_weather_today_renders_current_and_forecast():
     setup()
     base.fetch_json = FakeFetch(WEATHER_PAYLOAD)
     text = weather.block("какая сегодня погода?", NOW)
-    assert text.startswith("Погода (сегодня): сейчас +14°, облачно, ветер 12 км/ч."), text
-    assert "Днём до +18°, ночью до +9°" in text
-    assert "вероятность дождя 10%" in text
+    # Spoken Russian, not glyphs: the model repeats whatever shape it is
+    # given, and "+14°" comes back out of the speaker as a string of symbols.
+    assert text.startswith("Погода (сегодня): сейчас плюс четырнадцать градусов, "
+                           "облачно, ветер двенадцать километров в час."), text
+    assert "Днём плюс восемнадцать градусов, ночью плюс девять градусов" in text
+    assert "вероятность дождя десять процентов" in text
+    assert not any(char.isdigit() for char in text), text
 
 
 def test_weather_tomorrow_uses_second_day_without_current():
     setup()
     base.fetch_json = FakeFetch(WEATHER_PAYLOAD)
     text = weather.block("а завтра будет дождь?", NOW)
-    assert text.startswith("Погода (завтра): Днём до +12°"), text
+    assert text.startswith("Погода (завтра): Днём плюс двенадцать градусов"), text
     assert "сейчас" not in text
-    assert "дождя 80%" in text
+    assert "дождя восемьдесят процентов" in text
 
 
 def test_weather_is_cached_within_ttl():
@@ -118,7 +122,7 @@ def test_weather_serves_stale_when_fetch_fails():
     weather.block("погода", NOW)
     base.fetch_json = FakeFetch(error=TimeoutError("timed out"))
     text = weather.block("погода", NOW + timedelta(hours=2))
-    assert text.startswith("Погода (сегодня): сейчас +14°"), text
+    assert text.startswith("Погода (сегодня): сейчас плюс четырнадцать градусов"), text
     assert prompts.WEATHER_STALE in text
 
 
@@ -154,8 +158,10 @@ def test_places_renders_distance_and_hours():
     base.fetch_json = FakeFetch(PLACES_PAYLOAD)
     text = places.block("до скольки работает аптека?", NOW)
     assert text.startswith("Места поблизости по запросу «аптека»"), text
-    assert "- Аптека Вита, ул. Ленина, 5, в 270 м, сегодня 08:00–22:00" in text, text
-    assert "Аптека 24, пр. Мира, 10, в 890 м, круглосуточно" in text, text
+    assert ("- Аптека Вита, ул. Ленина, 5, двести семьдесят метров, "
+            "сегодня с восьми до двадцати двух") in text, text
+    assert ("Аптека 24, пр. Мира, 10, восемьсот девяносто метров, "
+            "круглосуточно") in text, text
     assert "- Аптека без графика, прямо у дома" in text, text
 
 

@@ -22,6 +22,8 @@ from __future__ import annotations
 import re
 from datetime import date, timedelta
 
+from . import num_to_words
+
 SCHEDULE = "schedule"
 WEATHER = "weather"
 REPEAT = "repeat"
@@ -139,7 +141,7 @@ _RELATIVE_LABELS = {-2: "позавчера", -1: "вчера", 0: "сегодн
 
 
 def day_label(day: date, today: date) -> str:
-    """'завтра', or 'среда, 17.09' for days further out.
+    """'завтра', or 'среда, семнадцатое сентября' for days further out.
 
     The label matters as much as the data under it: the model repeats
     whatever day-word it is given, so an unlabelled block invites a
@@ -148,7 +150,7 @@ def day_label(day: date, today: date) -> str:
     offset = (day - today).days
     if offset in _RELATIVE_LABELS:
         return _RELATIVE_LABELS[offset]
-    return f"{WEEKDAYS[day.weekday()]}, {day.day:02d}.{day.month:02d}"
+    return f"{WEEKDAYS[day.weekday()]}, {num_to_words.date_words(day)}"
 
 
 def resolve_day(transcript: str, today: date) -> date:
