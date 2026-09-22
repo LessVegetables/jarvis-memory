@@ -41,14 +41,39 @@ WEATHER_PAYLOAD = {
     ]},
 }
 
+# 02:19 on the Tuesday. The hour is not arbitrary: it is when the assistant
+# was asked which pharmacy was open and answered with one that had closed at
+# 22:00, because nothing ever compared the clock against the hours.
+NIGHT = datetime(2026, 9, 15, 2, 19)
+
+
+def _every_day(start, end):
+    return {day: {"working_hours": [{"from": start, "to": end}]}
+            for day in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]}
+
+
 PLACES_PAYLOAD = {"result": {"items": [
     {"name": "Аптека Вита", "address_name": "ул. Ленина, 5",
-     "point": {"lat": 55.7560, "lon": 37.6230},
-     "schedule": {"Mon": {"working_hours": [{"from": "08:00", "to": "22:00"}]}}},
+     "point": {"lat": 55.7560, "lon": 37.6230},              # ~270 m, nearest
+     "reviews": {"general_rating": 4.3, "general_review_count": 128},
+     "schedule": _every_day("08:00", "22:00")},
     {"name": "Аптека 24", "address_name": "пр. Мира, 10",
-     "point": {"lat": 55.7600, "lon": 37.6300},
+     "point": {"lat": 55.7600, "lon": 37.6300},              # ~890 m
+     "reviews": {"general_rating": 4.8, "general_review_count": 37},
      "schedule": {"is_24x7": True}},
-    {"name": "Аптека без графика", "point": {"lat": 55.7539, "lon": 37.6208}},
+    # No schedule, no address, no reviews: every shape has to survive a
+    # listing that is missing the field it wants.
+    {"name": "Аптека без графика", "point": {"lat": 55.7700, "lon": 37.6400}},
+]}}
+
+# Nothing open around the clock, so at 02:19 every one of them is shut.
+CLOSED_PAYLOAD = {"result": {"items": [
+    {"name": "Аптека Экона", "address_name": "Морской проспект, 6",
+     "point": {"lat": 55.7560, "lon": 37.6230},
+     "schedule": _every_day("09:00", "21:00")},
+    {"name": "Аптека Академическая", "address_name": "ул. Ленина, 5",
+     "point": {"lat": 55.7600, "lon": 37.6300},
+     "schedule": _every_day("08:00", "22:00")},
 ]}}
 
 
@@ -153,18 +178,139 @@ def test_query_extraction():
         assert places.query_from(phrase) == expected, (phrase, places.query_from(phrase))
 
 
-def test_places_renders_distance_and_hours():
+def _names_in(text):
+    """Which of the fixture's businesses a block mentions."""
+    return {name for name in ("Аптека Вита", "Аптека 24", "Аптека без графика")
+            if name in text}
+
+
+def test_block_names_exactly_one_place():
+    """The bug this whole rewrite exists for.
+
+    Four businesses listed with four fields each let the model build one
+    sentence out of three different listings. Every shape but the list names
+    a single business, so there is nothing left to cross-wire.
+    """
+    setup()
+    for question in ("какая аптека ближе всего", "какая аптека сейчас открыта",
+                     "до скольки работает аптека", "адрес аптеки",
+                     "у какой аптеки рейтинг лучше"):
+        base.fetch_json = FakeFetch(PLACES_PAYLOAD)
+        db.connect().execute("DELETE FROM api_cache")
+        text = places.block(question, NOW)
+        assert len(_names_in(text)) == 1, (question, text)
+
+
+def test_nearest_gives_distance_and_no_hours():
+    setup()
+    base.fetch_json = FakeFetch(PLACES_PAYLOAD)
+    text = places.block("какая аптека ближе всего", NOW)
+    assert "«Аптека Вита»" in text, text
+    assert "двести семьдесят метров" in text, text
+    # The fields that do not answer "which is nearest" are simply absent.
+    assert "восьми" not in text and "Ленина" not in text, text
+
+
+def test_hours_shape_says_hours_only():
     setup()
     base.fetch_json = FakeFetch(PLACES_PAYLOAD)
     text = places.block("до скольки работает аптека?", NOW)
-    assert text.startswith("Места поблизости по запросу «аптека»"), text
+    assert "«Аптека Вита»" in text, text
+    assert "с восьми до двадцати двух" in text, text
+    assert "метров" not in text, text
+
+
+def test_address_shape_joins_house_number():
+    setup()
+    base.fetch_json = FakeFetch(PLACES_PAYLOAD)
+    text = places.block("какой адрес у аптеки", NOW)
     # The house number joins the street without a comma: spoken, that pause
     # splits one name in two -- "Морской проспект... шесть".
-    assert ("- Аптека Вита, ул. Ленина 5, двести семьдесят метров, "
-            "сегодня с восьми до двадцати двух") in text, text
-    assert ("Аптека 24, пр. Мира 10, восемьсот девяносто метров, "
-            "круглосуточно") in text, text
-    assert "- Аптека без графика, прямо у дома" in text, text
+    assert "ул. Ленина 5" in text, text
+
+
+def test_rating_picks_the_best_not_the_nearest():
+    setup()
+    base.fetch_json = FakeFetch(PLACES_PAYLOAD)
+    text = places.block("у какой аптеки рейтинг лучше", NOW)
+    assert "«Аптека 24»" in text, text          # 4.8, though it is the farther one
+    # A rating is said "четыре и восемь", not "четыре целых восемь десятых".
+    assert "четыре и восемь" in text, text
+    assert "тридцать семь отзывов" in text, text
+
+
+def test_open_now_at_night_skips_the_closed_one():
+    """02:19, straight from the log. Вита shut at 22:00; Аптека 24 has not."""
+    setup()
+    base.fetch_json = FakeFetch(PLACES_PAYLOAD)
+    text = places.block("какая аптека сейчас работает", NIGHT)
+    assert "«Аптека 24»" in text, text
+    assert "Вита" not in text, text
+
+
+def test_nothing_open_says_so_and_gives_the_next_opening():
+    """The other half of the log: when everything is shut, say so."""
+    setup()
+    base.fetch_json = FakeFetch(CLOSED_PAYLOAD)
+    text = places.block("какая аптека сейчас работает", NIGHT)
+    assert "не работает ничего" in text, text
+    # Академическая opens at 08:00, an hour before Экона.
+    assert "«Аптека Академическая»" in text, text
+    assert "сегодня в восемь часов" in text, text
+
+
+def test_list_shape_carries_names_and_nothing_else():
+    setup()
+    base.fetch_json = FakeFetch(PLACES_PAYLOAD)
+    text = places.block("какие аптеки рядом", NOW)
+    assert len(_names_in(text)) == 3, text
+    # Names cannot be mismatched with each other; fields can.
+    for leak in ("метров", "Ленина", "восьми", "рейтинг"):
+        assert leak not in text, (leak, text)
+
+
+def test_missing_fields_get_a_sentence_not_a_hole():
+    setup()
+    payload = {"result": {"items": [
+        {"name": "Аптека без всего", "point": {"lat": 55.7560, "lon": 37.6230}},
+    ]}}
+    for question, expected in (("до скольки работает аптека", "Часы работы"),
+                               ("какой адрес у аптеки", "Адрес места"),
+                               ("у какой аптеки рейтинг лучше", "Оценок и отзывов нет")):
+        setup()
+        base.fetch_json = FakeFetch(payload)
+        text = places.block(question, NOW)
+        assert expected in text, (question, text)
+
+
+def test_distance_followup_uses_the_remembered_place():
+    """"А это далеко?" is about the place named a turn ago, not a new search."""
+    setup()
+    base.fetch_json = FakeFetch(PLACES_PAYLOAD)
+    first = places.answer("какая аптека ближе всего", NOW)
+    assert first.place is not None
+
+    # No fetch at all on the follow-up: searching again could quietly answer
+    # about a different business than the question meant.
+    base.fetch_json = FakeFetch(error=AssertionError("must not search again"))
+    text = places.answer("а это далеко?", NOW, last_place=first.place).text
+    assert "«Аптека Вита»" in text, text
+    assert "двести семьдесят метров" in text, text
+
+
+def test_distance_followup_without_a_place_asks_back():
+    setup()
+    assert places.block("а это далеко?", NOW) == prompts.PLACE_DISTANCE_UNKNOWN
+
+
+def test_dislikes_are_dropped_before_anything_is_chosen():
+    """A disliked place must not come back as "the nearest" either."""
+    setup()
+    base.fetch_json = FakeFetch(PLACES_PAYLOAD)
+    text = places.answer("какая аптека ближе всего", NOW,
+                         dislikes=("вита",)).text
+    assert "Вита" not in text, text
+    assert "«Аптека 24»" in text, text
 
 
 def test_places_without_query_asks_back():
@@ -211,7 +357,7 @@ def test_known_user_places_question_keeps_facts():
     setup()
     base.fetch_json = FakeFetch(PLACES_PAYLOAD)
     ctx = memory.build_context("anton", "какие кафе рядом?", now=NOW)
-    assert "Места поблизости по запросу «кафе»" in ctx.system_prompt
+    assert "Поблизости есть" in ctx.system_prompt
     assert "Что важно помнить о собеседнике" in ctx.system_prompt
 
 
@@ -224,7 +370,18 @@ TESTS = [
     test_weather_unavailable_when_nothing_cached,
     test_weather_out_of_range_days,
     test_query_extraction,
-    test_places_renders_distance_and_hours,
+    test_block_names_exactly_one_place,
+    test_nearest_gives_distance_and_no_hours,
+    test_hours_shape_says_hours_only,
+    test_address_shape_joins_house_number,
+    test_rating_picks_the_best_not_the_nearest,
+    test_open_now_at_night_skips_the_closed_one,
+    test_nothing_open_says_so_and_gives_the_next_opening,
+    test_list_shape_carries_names_and_nothing_else,
+    test_missing_fields_get_a_sentence_not_a_hole,
+    test_distance_followup_uses_the_remembered_place,
+    test_distance_followup_without_a_place_asks_back,
+    test_dislikes_are_dropped_before_anything_is_chosen,
     test_places_without_query_asks_back,
     test_places_404_means_nothing_found,
     test_places_sends_lon_lat_in_that_order,

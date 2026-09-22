@@ -36,6 +36,14 @@ _buffers: dict[str, list[tuple[datetime, str, str]]] = {}
 # The router uses it to resolve short follow-ups like "а тренировка?".
 _last_intent: dict[str, tuple[datetime, str]] = {}
 
+# user_id -> (timestamp, the one place the last places answer named).
+# What it holds is whatever providers.places hands over -- kept untyped here
+# so that history, which every module imports, does not import a provider.
+# This is what makes "а это далеко?" answerable: the follow-up is about a
+# business named a turn ago, and searching again could quietly answer about a
+# different one than the question meant.
+_last_place: dict[str, tuple[datetime, object]] = {}
+
 # History for an unrecognised speaker is shared across all of them. Fine for
 # a prototype, but worth remembering: two different guests would see each
 # other's turns.
@@ -109,11 +117,30 @@ def get_last_intent(user_id: str | None,
     return intent if now - timestamp <= TTL else None
 
 
+def set_last_place(user_id: str | None, place: object,
+                   now: datetime | None = None) -> None:
+    """Remember the one place the last answer named, for distance follow-ups."""
+    _last_place[_key(user_id)] = (now or datetime.now(), place)
+
+
+def get_last_place(user_id: str | None,
+                   now: datetime | None = None) -> object | None:
+    """The place named recently enough to still be what "это" refers to."""
+    now = now or datetime.now()
+    entry = _last_place.get(_key(user_id))
+    if entry is None:
+        return None
+    timestamp, place = entry
+    return place if now - timestamp <= TTL else None
+
+
 def clear(user_id: str | None = None) -> None:
     """Drop history, for one user or all of them. Needed in tests."""
     if user_id is None:
         _buffers.clear()
         _last_intent.clear()
+        _last_place.clear()
     else:
         _buffers.pop(_key(user_id), None)
         _last_intent.pop(_key(user_id), None)
+        _last_place.pop(_key(user_id), None)

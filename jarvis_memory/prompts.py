@@ -70,3 +70,53 @@ PLACES_UNAVAILABLE = "Поиск мест по запросу «{query}»: се�
 PLACES_NONE = "Поиск мест по запросу «{query}»: поблизости ничего не нашлось."
 PLACES_BLOCK = "Места поблизости по запросу «{query}» (расстояние от дома):\n{lines}"
 PLACES_STALE = "(Данные из кэша, могли устареть.)"
+
+# --- one shape of answer per shape of question ------------------------------
+# These replace the old "here are four businesses with four fields each"
+# block. Each names exactly one place and carries only the fields that answer
+# the question asked, because a field the answer does not need is a field the
+# model can attach to the wrong name -- which is precisely what happened:
+# "Аптека Экона, Морской проспект, шесть, восемьсот семьдесят метров" took its
+# name, address and distance from three different listings.
+#
+# The register is the same as REMEMBER_BLOCK above: the code states the
+# finished fact, the model's whole job is to say it in a sentence. Nothing
+# below asks it to compare, filter or choose -- places.py has already done
+# that. Phrasings avoid adjectives that would have to agree in gender with
+# the business name ("открыт" / "открыта"), since the model copies whatever
+# it is shown and the name is not known in advance.
+PLACE_NEAREST_BLOCK = ('Самое близкое место — «{name}», до него {distance}. '
+                       'Скажи об этом одним предложением.')
+PLACE_OPEN_NOW_BLOCK = ('Сейчас работает «{name}», {address}. Скажи об этом '
+                        'одним предложением.')
+PLACE_NONE_OPEN_BLOCK = ('Сейчас поблизости не работает ничего. Раньше всех '
+                         'откроется «{name}» — {opens}. Скажи об этом.')
+PLACE_NONE_OPEN_UNKNOWN = ('Сейчас поблизости не работает ничего, и когда '
+                           'откроется — неизвестно. Скажи об этом.')
+PLACE_OPENS_EARLIEST_BLOCK = ('Раньше всех откроется «{name}» — {opens}. '
+                              'Скажи об этом одним предложением.')
+PLACE_ALWAYS_OPEN_BLOCK = ('«{name}» работает круглосуточно. Скажи об этом '
+                           'одним предложением.')
+PLACE_HOURS_BLOCK = ('«{name}» сегодня работает {hours}. Скажи об этом одним '
+                     'предложением.')
+PLACE_ADDRESS_BLOCK = ('«{name}» находится по адресу: {address}. Скажи об этом '
+                       'одним предложением.')
+PLACE_RATING_BLOCK = ('Лучшее по отзывам место — «{name}», рейтинг {rating}, '
+                      '{reviews}. Скажи об этом одним предложением.')
+PLACE_LIST_BLOCK = ('Поблизости есть: {names}. Перечисли их, больше ничего не '
+                    'добавляй.')
+
+# A distance question refers to a place named in the previous turn. Answered
+# from memory, without a new search: searching again could quietly answer
+# about a different business than the one the question meant.
+PLACE_DISTANCE_BLOCK = ('До места «{name}» — {distance}. Скажи об этом одним '
+                        'предложением.')
+PLACE_DISTANCE_UNKNOWN = ('Тебя спрашивают, далеко ли это, но ты пока не '
+                          'называл никакого места. Переспроси, о чём речь.')
+
+# Missing fields get their own sentence rather than an empty slot: a template
+# with a hole in it is answered with an invention.
+PLACE_NO_HOURS = 'Часы работы места «{name}» неизвестны. Скажи об этом.'
+PLACE_NO_ADDRESS = 'Адрес места «{name}» неизвестен. Скажи об этом.'
+PLACE_NO_RATING = ('Оценок и отзывов нет. Ближайшее подходящее место — '
+                   '«{name}». Скажи об этом.')

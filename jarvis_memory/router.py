@@ -122,6 +122,81 @@ def extract_fact(transcript: str) -> str:
     return stripped or transcript.strip()
 
 
+# --- what shape of answer a question about places wants ---------------------
+#
+# The intent says the question is about places. This says what it wants to
+# know, which decides both which of the found businesses gets into the prompt
+# and which of its fields come with it.
+#
+# Why that matters more than it sounds: four businesses listed with four
+# fields each is what produced "Аптека Экона, Морской проспект, шесть,
+# восемьсот семьдесят метров" -- the name from the second listing, the address
+# from the first, the distance from the third. The model was not inventing
+# anything, it was reading across the rows of a table nobody told it was a
+# table. Every extra field in the prompt is one more thing that can end up
+# attached to the wrong name, so each shape below is rendered with only the
+# fields that answer it.
+PLACE_DISTANCE = "distance"              # "а это далеко?" -- about a place already named
+PLACE_OPENS_EARLIEST = "opens_earliest"
+PLACE_OPEN_NOW = "open_now"
+PLACE_RATING = "rating"
+PLACE_HOURS = "hours"
+PLACE_ADDRESS = "address"
+PLACE_LIST = "list"
+PLACE_NEAREST = "nearest"                # the default: no qualifier means "which one"
+
+# First match wins, as in _PATTERNS. The order is the whole design here --
+# the confusable phrasings all contain the keyword of a shape they do not
+# mean, so the more specific question has to be asked first.
+_PLACE_SHAPES: list[tuple[str, str]] = [
+    # Checked first because it is the only one that needs no search at all:
+    # it is about a place named in the previous turn.
+    (PLACE_DISTANCE, r"\bдалеко\b|\bсколько (до|метров|километров|идти)"
+                     r"|\bдолго (ли )?идти|\bблизко (ли )?(это|она|он)"),
+
+    # Before PLACE_NEAREST, because "во сколько откроется ближайшая аптека"
+    # says "ближайшая" and is not asking which one is nearest.
+    (PLACE_OPENS_EARLIEST, r"раньше всех|сам[аоы][яе] ранн|пораньше"
+                           r"|раньше (всего|открыв|работает)"
+                           r"|(работает|открывается) раньше"
+                           r"|во сколько (она |он |оно )?(откр|начина)"
+                           r"|когда откр"),
+
+    # Deliberately not a bare "сейчас": "какая аптека сейчас ближе" is a
+    # distance question that happens to contain the word.
+    (PLACE_OPEN_NOW, r"сейчас (работает|открыт|закрыт)"
+                     r"|(работает|открыт\w*|закрыт\w*) сейчас"
+                     r"|прямо сейчас|еще (не )?(открыт|закрыл|работает)"
+                     r"|не закрыл|есть открыт|уже открыл"
+                     r"|\bоткрыт[аоы]?\b|\bзакрыт[аоы]?\b"),
+
+    (PLACE_RATING, r"рейтинг|оценк|отзыв|лучш\w*|получше"
+                   r"|хорош\w* (кафе|ресторан|аптек|магазин|мест)"),
+
+    (PLACE_HOURS, r"до скольк|режим работы|часы работы|когда закрыв"
+                  r"|во сколько закрыв|работает до|с[о]? скольки"),
+
+    (PLACE_ADDRESS, r"\bадрес\b|где находится|на какой улице"
+                    r"|как (туда )?(добраться|дойти|пройти)"),
+
+    (PLACE_LIST, r"\bкакие\b|\bсписок\b|\bварианты\b|\bперечисли\b"
+                 r"|что есть\b|что тут есть|что рядом есть"),
+]
+
+
+def place_shape(transcript: str) -> str:
+    """Which shape of answer a places question wants.
+
+    Defaults to PLACE_NEAREST: an unqualified "где аптека" is asking which
+    one to walk to, and the nearest is the only honest answer to that.
+    """
+    text = normalise(transcript)
+    for shape, pattern in _PLACE_SHAPES:
+        if re.search(pattern, text):
+            return shape
+    return PLACE_NEAREST
+
+
 # Which day a schedule question is about. Longest forms first: "послезавтра"
 # must not be read as "завтра". Past days are here because "что у меня было
 # вчера" is a perfectly ordinary question.

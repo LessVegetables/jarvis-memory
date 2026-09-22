@@ -86,7 +86,14 @@ def build_context(user_id: str | None, transcript: str,
     if intent == router.WEATHER:
         blocks.append(weather.block(transcript, now))
     elif intent == router.PLACES:
-        blocks.append(places.block(transcript, now))
+        # The answer carries the one place it named, if it named one. Holding
+        # onto it is what makes the next turn's "а это далеко?" answerable
+        # about that business rather than about a fresh search's first hit.
+        found = places.answer(
+            transcript, now, last_place=history.get_last_place(user_id, now=now))
+        blocks.append(found.text)
+        if found.place is not None:
+            history.set_last_place(user_id, found.place, now=now)
 
     if profile is None:
         # Personal intents get the refusal. Anything else is answered as to
