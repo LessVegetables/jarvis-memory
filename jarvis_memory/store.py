@@ -150,12 +150,13 @@ def add_fact(user_id: str, text: str) -> int:
         if row["text"].strip().casefold() == wanted:
             return row["id"]
 
-    cursor = conn.execute(
-        "INSERT INTO facts (user_id, text) VALUES (?, ?)", (user_id, text)
-    )
-    fact_id = cursor.lastrowid
-    _index_facts([(fact_id, user_id, text)])
-    conn.commit()
+    # Rolls back on failure so a half-done write never holds the lock.
+    with conn:
+        cursor = conn.execute(
+            "INSERT INTO facts (user_id, text) VALUES (?, ?)", (user_id, text)
+        )
+        fact_id = cursor.lastrowid
+        _index_facts([(fact_id, user_id, text)])
     return fact_id
 
 
@@ -208,16 +209,20 @@ def archive_exchange(user_id: str, question: str, answer: str,
     """
     now = now or datetime.now()
     conn = db.connect()
-    cursor = conn.execute(
-        "INSERT INTO dialogue (user_id, question, answer, created_at) "
-        "VALUES (?, ?, ?, ?)",
-        (user_id, question, answer, now.strftime("%Y-%m-%d %H:%M:%S")),
-    )
-    dialogue_id = cursor.lastrowid
-    _index_dialogue([(dialogue_id, user_id, int(now.timestamp()),
-                      _dialogue_document(question, answer))])
-    _prune_dialogue(user_id)
-    conn.commit()
+    # `with conn` rolls back on any exception. Without it a failed INSERT
+    # (e.g. an unknown user_id tripping the foreign key) leaves the implicit
+    # transaction open, and this thread's connection holds the write lock
+    # forever -- every other thread then gets "database is locked".
+    with conn:
+        cursor = conn.execute(
+            "INSERT INTO dialogue (user_id, question, answer, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (user_id, question, answer, now.strftime("%Y-%m-%d %H:%M:%S")),
+        )
+        dialogue_id = cursor.lastrowid
+        _index_dialogue([(dialogue_id, user_id, int(now.timestamp()),
+                          _dialogue_document(question, answer))])
+        _prune_dialogue(user_id)
     return dialogue_id
 
 

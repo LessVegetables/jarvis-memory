@@ -112,7 +112,9 @@ def record_answer(user_id: str | None, question: str, answer: str,
     """
     now = now or datetime.now()
     history.record_answer(user_id, question, answer, now=now)
-    if user_id is None:
+    # Same rule as build_context: no profile means no identified user, and
+    # the archive's foreign key would reject the row anyway.
+    if user_id is None or store.get_profile(user_id) is None:
         return
     try:
         store.archive_exchange(user_id, question, answer, now=now)
