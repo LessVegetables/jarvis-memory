@@ -28,6 +28,24 @@ CASES = [
     (None,    "какое у меня сегодня расписание?"),
     ("anton", "что приготовить на ужин?"),
     (None,    "какая сегодня погода?"),
+
+    # Places: the same search, five different questions. Each block names one
+    # business and carries only the fields that answer what was asked -- the
+    # thing to look at here is what is NOT in each prompt.
+    ("anton", "какая аптека ближе всего"),
+    ("anton", "какая аптека сейчас работает"),
+    ("anton", "до скольки работает аптека"),
+    ("anton", "у какой аптеки рейтинг лучше"),
+    ("anton", "какие аптеки рядом"),
+
+    # A preference that changes behaviour: after this, Экона stops appearing
+    # in the answer above -- and the sentence itself stops appearing too, so
+    # the name is not reintroduced into the prompt it was filtered out of.
+    ("anton", "запомни, я терпеть не могу аптеку Экона"),
+    ("anton", "какая аптека ближе всего"),
+
+    # Music: the command has already run by the time the model sees this.
+    ("anton", "включи мой любимый плейлист"),
 ]
 
 
